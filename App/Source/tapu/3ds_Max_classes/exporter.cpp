@@ -3,6 +3,7 @@
 #include "resource.h"
 #include <array>
 #include <charconv>
+#include <decomp.h>
 #include <filesystem>
 #include <fstream>
 #include <fx/gltf.h>
@@ -259,15 +260,47 @@ private:
   target_type _target;
 };
 
+template <class T> struct dependent_false : std::false_type {};
+
+bool undo_parents_offset(INode &node_, Point3 &point_, Quat &offset_rotation_) {
+  auto parent = node_.GetParentNode();
+  if (parent->IsRootNode()) {
+    return false;
+  }
+  auto parentOffsetRotation = parent->GetObjOffsetRot();
+  if (parentOffsetRotation == IdentQuat()) {
+    return false;
+  }
+  Matrix3 mat(true);
+  parentOffsetRotation.MakeMatrix(mat);
+  mat = Inverse(mat);
+  point_ = VectorTransform(mat, point_);
+  offset_rotation_ = offset_rotation_ / parentOffsetRotation;
+  return true;
+}
+
+Matrix3 get_local_node_tm(INode &max_node_, TimeValue time_) {
+  auto worldTM = max_node_.GetNodeTM(time_);
+  if (!max_node_.GetParentNode()->IsRootNode()) {
+    auto inverseParent = Inverse(max_node_.GetParentNode()->GetNodeTM(time_));
+    return worldTM * inverseParent;
+  } else {
+    return worldTM;
+  }
+}
+
 class glTf_creator {
 public:
   using node_handle = std::uint32_t;
 
   using mesh_handle = std::uint32_t;
 
+  using animation_handle = std::uint32_t;
+
   using scene_handle = std::uint32_t;
 
-  glTf_creator(const export_settings &settings_) : _settings(settings_) {
+  glTf_creator(const export_settings &settings_, Interface &max_interface_)
+      : _settings(settings_), _maxInterface(max_interface_) {
   }
 
   scene_handle add_scene() {
@@ -364,6 +397,13 @@ public:
                     gsl::make_span(indices.get(), vertices.size()));
   }
 
+  void add_node_animation(INode &max_node_, node_handle node_) {
+    auto transformController = max_node_.GetTMController();
+    auto positionTrack = _readPositionTrack(max_node_, *transformController);
+    auto scaleTrack = _readScaleTrack(max_node_, *transformController);
+    auto rotationTrack = _readRotationTrack(max_node_, *transformController);
+  }
+
   void set_default_scene(scene_handle scene_) {
     assert(scene_ < _glTfDocument.scenes.size());
     _glTfDocument.scene = scene_;
@@ -389,7 +429,7 @@ public:
 
   void commit() {
     if (_bufferSegments.length() == 0) {
-      (void)_bufferSegments.allocate_view(1);
+      (void)_bufferSegments.allocate_view(1, 1);
     }
     _glTfDocument.buffers.emplace_back();
     auto &mainBuffer = _glTfDocument.buffers.back();
@@ -449,7 +489,14 @@ private:
     }
 
     std::pair<fx::gltf::BufferView, std::byte *>
-    allocate_view(std::uint32_t size_) {
+    allocate_view(std::uint32_t size_, std::uint32_t alignment_) {
+      if (alignment_ != 0) {
+        if (auto remainder = _length % alignment_; remainder != 0) {
+          auto complement = alignment_ - remainder;
+          _length += complement;
+          _buffers.emplace_back(complement);
+        }
+      }
       fx::gltf::BufferView bufferView;
       bufferView.buffer = _index;
       bufferView.byteOffset = _length;
@@ -484,6 +531,7 @@ private:
   _unmerged_buffer_segments _bufferSegments = 0;
   fx::gltf::Document _glTfDocument;
   const export_settings &_settings;
+  Interface &_maxInterface;
 
   void _doSave(std::string_view path_, bool binary_) try {
     auto path = std::filesystem::u8path(path_).string();
@@ -514,7 +562,7 @@ private:
     primitive.indices = indicesAccessorIndex;
 
     auto szMainVB = 3 * 4 * vertex_list_.size();
-    auto [mainVBView, mainVB] = _bufferSegments.allocate_view(szMainVB);
+    auto [mainVBView, mainVB] = _bufferSegments.allocate_view(szMainVB, 4);
     auto mainVBViewIndex = _addBufferView(std::move(mainVBView));
 
     fx::gltf::Accessor positionAccessor;
@@ -539,7 +587,8 @@ private:
       max[0] = std::max(v.x, max[0]);
       max[1] = std::max(v.y, max[1]);
       max[2] = std::max(v.z, max[2]);
-      auto pOutput = reinterpret_cast<float *>(mainVB + 3u * 4u * iVertex);
+      auto pOutput = reinterpret_cast<float *>(
+          mainVB + static_cast<std::size_t>(3u * 4u * iVertex));
       pOutput[0] = v.x;
       pOutput[1] = v.y;
       pOutput[2] = v.z;
@@ -617,9 +666,10 @@ private:
     }
     }
 
-    auto [bufferView, bufferViewData] =
-        _bufferSegments.allocate_view(_ensureNotOverflow<std::uint32_t>(
-            glTf_overflow::target_type::buffer, sizeofIndex * indices_.size()));
+    auto [bufferView, bufferViewData] = _bufferSegments.allocate_view(
+        _ensureNotOverflow<std::uint32_t>(glTf_overflow::target_type::buffer,
+                                          sizeofIndex * indices_.size()),
+        sizeofIndex);
 
     auto glTfComponentType = fx::gltf::Accessor::ComponentType::None;
     switch (*usingType) {
@@ -725,6 +775,221 @@ private:
     ApplyScaling(tm, scaleValue);
     return tm;
   }
+
+  enum class _track_kind {
+    translation,
+    scale,
+    rotation,
+  };
+
+  template <_track_kind TrackKind> struct _track_value {};
+
+  template <> struct _track_value<_track_kind::translation> {
+    using type = Point3;
+  };
+
+  template <> struct _track_value<_track_kind::scale> { using type = Point3; };
+
+  template <> struct _track_value<_track_kind::rotation> { using type = Quat; };
+
+  template <_track_kind TrackKind>
+  using _track_value_t = typename _track_value<TrackKind>::type;
+
+  template <_track_kind TrackKind> class _xx_track {
+    using value_type = _track_value_t<TrackKind>;
+
+  public:
+    _xx_track(std::uint32_t size_) : _times(size_), _values(size_) {
+    }
+
+    void set(std::uint32_t index_, TimeValue time_, const value_type &value_) {
+      _times[index_] = time_;
+      _values[index_] = value_;
+    }
+
+    TimeValue &timeAt(std::uint32_t index_) {
+      return _times[index_];
+    }
+
+    value_type &valueAt(std::uint32_t index_) {
+      return _values[index_];
+    }
+
+    _xx_track subtrack_pre(std::uint32_t size_) {
+      assert(size_ <= _values.size());
+      _xx_track result(size_);
+      std::copy_n(_times.begin(), size_, result._times.begin());
+      std::copy_n(_values.begin(), size_, result._values.begin());
+      return result;
+    }
+
+  private:
+    std::vector<TimeValue> _times;
+    std::vector<value_type> _values;
+  };
+
+  _xx_track<_track_kind::translation>
+  _readPositionTrack(INode &max_node_, Control &transform_control_) {
+    return _readTRSTrack<_track_kind::translation>(
+        max_node_, transform_control_.GetPositionController());
+  }
+
+  _xx_track<_track_kind::scale> _readScaleTrack(INode &max_node_,
+                                                Control &transform_control_) {
+    return _readTRSTrack<_track_kind::scale>(
+        max_node_, transform_control_.GetScaleController());
+  }
+
+  _xx_track<_track_kind::rotation>
+  _readRotationTrack(INode &max_node_, Control &transform_control_) {
+    return _readTRSTrack<_track_kind::rotation>(
+        max_node_, transform_control_.GetRotationController());
+  }
+
+  template <_track_kind TrackKind>
+  _xx_track<TrackKind> _readTRSTrack(INode &max_node_, Control *control_) {
+    auto classId =
+        TrackKind == _track_kind::translation
+            ? TCBINTERP_POSITION_CLASS_ID
+            : (TrackKind == _track_kind::scale ? TCBINTERP_SCALE_CLASS_ID
+                                               : TCBINTERP_ROTATION_CLASS_ID);
+
+    if (control_ && control_->NumKeys() != NOT_KEYFRAMEABLE &&
+        control_->ClassID() == Class_ID(classId, 0)) {
+      auto keyControl =
+          reinterpret_cast<IKeyControl *>(control_->GetInterface(I_KEYCONTROL));
+      assert(keyControl);
+      return _readTCBKeys<TrackKind>(max_node_, *keyControl);
+    } else {
+      return _readLinearKeys<TrackKind>(max_node_);
+    }
+  }
+
+  template <_track_kind TrackKind>
+  _xx_track<TrackKind> _readTCBKeys(INode &max_node_,
+                                    IKeyControl &key_control_) {
+    auto nKeys = key_control_.GetNumKeys();
+    _xx_track<TrackKind> track(nKeys);
+    for (decltype(nKeys) iKey = 0; iKey != nKeys; ++iKey) {
+      _track_value_t<TrackKind> trackValue;
+      TimeValue time;
+      if constexpr (TrackKind == _track_kind::translation) {
+        ITCBPoint3Key key;
+        key_control_.GetKey(iKey, &key);
+        trackValue = key.val;
+        time = key.time;
+      } else if constexpr (TrackKind == _track_kind::scale) {
+        ITCBScaleKey key;
+        key_control_.GetKey(iKey, &key);
+        trackValue = key.val.s;
+        time = key.time;
+      } else if constexpr (TrackKind == _track_kind::rotation) {
+        ITCBRotKey key;
+        key_control_.GetKey(iKey, &key);
+        auto qKey = QFromAngAxis(key.val.angle, key.val.axis);
+        trackValue = qKey;
+        time = key.time;
+      } else {
+        static_assert(dependent_false<decltype(ClassId)>::value,
+                      "Non-exhaused.");
+      }
+      _postprocessTrackValue<TrackKind>(max_node_, trackValue);
+      track.set(iKey, time / GetTicksPerFrame(), trackValue);
+    }
+    return track;
+  }
+
+  template <_track_kind TrackKind>
+  _xx_track<TrackKind> _readLinearKeys(INode &max_node_) {
+    const auto ticksPerFrame = GetTicksPerFrame();
+    auto animRange = _maxInterface.GetAnimRange();
+    auto nEssentialKeys = (animRange.End() - animRange.Start()) / ticksPerFrame;
+    ++nEssentialKeys;
+
+    _xx_track<TrackKind> track(nEssentialKeys);
+    std::uint32_t nKey = 0;
+    auto time = animRange.Start();
+    _track_value_t<TrackKind> rate;
+
+    for (decltype(nEssentialKeys) iEssentialKey = 0;
+         iEssentialKey < nEssentialKeys;
+         ++iEssentialKey, time += ticksPerFrame) {
+      auto localTM = get_local_node_tm(max_node_, time);
+      AffineParts affineParts;
+      decomp_affine(localTM, &affineParts);
+
+      _track_value_t<TrackKind> trackValue;
+      if constexpr (TrackKind == _track_kind::translation) {
+        trackValue = affineParts.t;
+      } else if constexpr (TrackKind == _track_kind::scale) {
+        trackValue = ScaleValue(affineParts.k, affineParts.u).s;
+        if (affineParts.f < 0) {
+          trackValue = -trackValue;
+        }
+      } else if constexpr (TrackKind == _track_kind::rotation) {
+        trackValue = affineParts.q;
+      } else {
+        static_assert(dependent_false<decltype(ClassId)>::value,
+                      "Non-exhaused.");
+      }
+
+      if (iEssentialKey == 0 ||
+          !_approxEqual(trackValue, track.valueAt(nKey - 1))) {
+        track.set(nKey++, time, trackValue);
+      }
+    }
+    auto reducedTrack = track.subtrack_pre(nKey);
+    return track;
+  }
+
+  template <_track_kind TrackKind>
+  void _postprocessTrackValue(INode &max_node_,
+                              _track_value_t<TrackKind> &value_) {
+    if constexpr (TrackKind == _track_kind::translation) {
+      Quat q;
+      undo_parents_offset(max_node_, value_, q);
+    } else if constexpr (TrackKind == _track_kind::scale) {
+      // Do nothing.
+    } else if constexpr (TrackKind == _track_kind::rotation) {
+      auto qOffset = value_ / Inverse(max_node_.GetObjOffsetRot());
+      Point3 p;
+      undo_parents_offset(max_node_, p, qOffset);
+      value_ = qOffset;
+    } else {
+      static_assert(dependent_false<decltype(ClassId)>::value, "Non-exhaused.");
+    }
+  }
+
+  template <_track_kind TrackKind>
+  std::uint32_t _writeTrack(const _xx_track<TrackKind> &track_) {
+    return 0;
+  }
+
+  template <_track_kind TrackKind> std::string _getChannelPath() {
+    if constexpr (TrackKind == _track_kind::translation) {
+      return u8"translation";
+    } else if constexpr (TrackKind == _track_kind::scale) {
+      return u8"scale";
+    } else if constexpr (TrackKind == _track_kind::rotation) {
+      return u8"rotation";
+    } else {
+      static_assert(dependent_false<decltype(ClassId)>::value, "Non-exhaused.");
+    }
+  }
+
+  static bool _approxEqual(float lhs_, float rhs_) {
+    return std::fabs(lhs_ - rhs_) < 1.0e-5f;
+  }
+
+  static bool _approxEqual(const Point3 &lhs_, const Point3 &rhs_) {
+    return _approxEqual(lhs_.x, rhs_.x) && _approxEqual(lhs_.y, rhs_.y) &&
+           _approxEqual(lhs_.z, rhs_.z);
+  }
+
+  static bool _approxEqual(const Quat &lhs_, const Quat &rhs_) {
+    return _approxEqual(lhs_.x, rhs_.x) && _approxEqual(lhs_.y, rhs_.y) &&
+           _approxEqual(lhs_.z, rhs_.z) && _approxEqual(lhs_.w, rhs_.w);
+  }
 };
 
 class main_visitor : public ITreeEnumProc {
@@ -758,6 +1023,7 @@ public:
       }
     }
     _nodeMaps.emplace(max_node_, glTfNode);
+    _creator.add_node_animation(*max_node_, glTfNode);
     return TREE_CONTINUE;
   }
 
@@ -849,7 +1115,7 @@ int glTf_exporter::DoExport(const MCHAR *name,
   settings.index = export_settings::index_setting::at_least;
   settings.index_type = export_settings::index_type_setting::unsigned_8;
 
-  glTf_creator creator{settings};
+  glTf_creator creator{settings, *i};
 
   main_visitor visitor{creator};
   ei->theScene->EnumTree(&visitor);
