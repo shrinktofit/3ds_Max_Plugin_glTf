@@ -36,6 +36,11 @@ std::array<glTf_extension_info, 2> glTf_extension_info_list{
     glTf_extension_info{glTf_extension::gltf, _M("GLTF")},
     glTf_extension_info{glTf_extension::glb, _M("GLB")}};
 
+std::string to_glTF_string(std::u8string_view string_) {
+  return std::string(reinterpret_cast<const char *>(string_.data()),
+                     string_.size());
+}
+
 class vertex_list {
 public:
   using size_type = std::uint32_t;
@@ -454,17 +459,19 @@ public:
       std::basic_stringstream<char8_t> urlss;
       urlss << u8"./" << binary_dir_name_;
       if (_glTfDocument.buffers.size() != 1) {
-        std::array<char8_t, sizeof(iBuffer) * CHAR_BIT> indexChars;
+        std::array<char, sizeof(iBuffer) * CHAR_BIT> indexChars;
         auto result = std::to_chars(
             indexChars.data(), indexChars.data() + indexChars.size(), iBuffer);
         assert(result.ec == std::errc());
         // TODO: indexString is not guarenteen as UTF8.
-        auto indexString =
-            std::u8string_view(indexChars.data(), result.ptr - indexChars.data());
+        auto indexString = std::u8string_view(
+            reinterpret_cast<const char8_t *>(indexChars.data()),
+            result.ptr - indexChars.data());
         urlss << u8"-" << indexString;
       }
       urlss << binary_ext_;
-      buffer.uri = std::filesystem::u8path(urlss.str()).u8string();
+      buffer.uri =
+          to_glTF_string(std::filesystem::path(urlss.str()).u8string());
     }
     _doSave(path_, false);
   }
@@ -534,7 +541,7 @@ private:
   Interface &_maxInterface;
 
   void _doSave(std::u8string_view path_, bool binary_) try {
-    auto path = std::filesystem::u8path(path_).string();
+    auto path = std::filesystem::path(path_).string();
     fx::gltf::Save(_glTfDocument, path, binary_);
   } catch (const std::exception &exception_) {
     DebugPrint(L"glTf-exporter: exception occured when save:");
@@ -594,7 +601,8 @@ private:
       pOutput[2] = v.z;
     }
     auto positionAccessorIndex = _addAccessor(std::move(positionAccessor));
-    primitive.attributes.emplace(u8"POSITION", positionAccessorIndex);
+    primitive.attributes.emplace(to_glTF_string(u8"POSITION"),
+                                 positionAccessorIndex);
 
     fx::gltf::Mesh mesh;
     mesh.name = name_;
