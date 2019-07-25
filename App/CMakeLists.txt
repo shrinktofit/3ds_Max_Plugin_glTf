@@ -22,7 +22,8 @@ target_compile_definitions (
 	_USRDLL
 )
 
-set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
+# set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
+target_compile_options(${PROJECT_NAME} PUBLIC "/std:c++latest")
 
 set_target_properties(${PROJECT_NAME} PROPERTIES RESOURCE ${resourceFiles} )
 

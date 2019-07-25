@@ -445,22 +445,22 @@ public:
   /// <param name="path_"></param>
   /// <param name="binary_dir_name_"></param>
   /// <param name="binary_ext_"></param>
-  void save(std::string_view path_,
-            std::string_view binary_dir_name_,
-            std::string_view binary_ext_) {
+  void save(std::u8string_view path_,
+            std::u8string_view binary_dir_name_,
+            std::u8string_view binary_ext_) {
     for (decltype(_glTfDocument.buffers)::size_type iBuffer = 0;
          iBuffer != _glTfDocument.buffers.size(); ++iBuffer) {
       auto &buffer = _glTfDocument.buffers[iBuffer];
-      std::stringstream urlss;
+      std::basic_stringstream<char8_t> urlss;
       urlss << u8"./" << binary_dir_name_;
       if (_glTfDocument.buffers.size() != 1) {
-        std::array<char, sizeof(iBuffer) * CHAR_BIT> indexChars;
+        std::array<char8_t, sizeof(iBuffer) * CHAR_BIT> indexChars;
         auto result = std::to_chars(
             indexChars.data(), indexChars.data() + indexChars.size(), iBuffer);
         assert(result.ec == std::errc());
         // TODO: indexString is not guarenteen as UTF8.
         auto indexString =
-            std::string_view(indexChars.data(), result.ptr - indexChars.data());
+            std::u8string_view(indexChars.data(), result.ptr - indexChars.data());
         urlss << u8"-" << indexString;
       }
       urlss << binary_ext_;
@@ -473,7 +473,7 @@ public:
   /// Save as .gltf file.
   /// </summary>
   /// <param name="path_"></param>
-  void save(std::string_view path_) {
+  void save(std::u8string_view path_) {
     for (auto &buffer : _glTfDocument.buffers) {
       buffer.uri.clear();
     }
@@ -533,7 +533,7 @@ private:
   const export_settings &_settings;
   Interface &_maxInterface;
 
-  void _doSave(std::string_view path_, bool binary_) try {
+  void _doSave(std::u8string_view path_, bool binary_) try {
     auto path = std::filesystem::u8path(path_).string();
     fx::gltf::Save(_glTfDocument, path, binary_);
   } catch (const std::exception &exception_) {

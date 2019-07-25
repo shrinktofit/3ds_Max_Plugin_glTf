@@ -22,4 +22,6 @@ std::string mchar_to_utf8(std::basic_string_view<MCHAR> mstr_) {
                             szResultStr, NULL, NULL);
   return result;
 }
+
+char8_t ch;
 } // namespace tapu::win32
