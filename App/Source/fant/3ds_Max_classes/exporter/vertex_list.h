@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace tapu {
+namespace fant {
 class vertex_list {
 public:
   using size_type = std::uint32_t;
@@ -172,4 +172,4 @@ private:
     return result;
   }
 };
-} // namespace tapu
+} // namespace fant

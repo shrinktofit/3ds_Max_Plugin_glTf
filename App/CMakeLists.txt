@@ -20,6 +20,7 @@ target_compile_definitions (
 	UNICODE
 	PUGIXML_WCHAR_MODE
 	_USRDLL
+	NOMINMAX
 )
 
 # set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)

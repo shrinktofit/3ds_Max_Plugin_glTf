@@ -1,7 +1,7 @@
 
-#include <tapu/support/win32/instance.h>
+#include <fant/support/win32/instance.h>
 
-namespace tapu::win32 {
+namespace fant::win32 {
 HINSTANCE global_instance = nullptr;
 
 HINSTANCE get_instance() {
@@ -11,4 +11,4 @@ HINSTANCE get_instance() {
 void set_instance(HINSTANCE handle_) {
   global_instance = handle_;
 }
-} // namespace tapu::win32
+} // namespace fant::win32

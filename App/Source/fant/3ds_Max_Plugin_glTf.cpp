@@ -2,13 +2,13 @@
 #include "resource.h"
 #include <Windows.h>
 #include <iparamb2.h>
-#include <tapu/3ds_Max_Plugin_glTf.h>
-#include <tapu/3ds_Max_classes/exporter.h>
-#include <tapu/support/win32/get_string_resource.h>
-#include <tapu/support/win32/instance.h>
+#include <fant/3ds_Max_Plugin_glTf.h>
+#include <fant/3ds_Max_classes/exporter.h>
+#include <fant/support/win32/get_string_resource.h>
+#include <fant/support/win32/instance.h>
 #include <tuple>
 
-using class_descriptions_t = std::tuple<tapu::glTf_exporter::class_description>;
+using class_descriptions_t = std::tuple<fant::glTf_exporter::class_description>;
 
 int controlsInit = FALSE;
 
@@ -23,9 +23,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL,
                     LPVOID /*lpvReserved*/) {
   if (fdwReason == DLL_PROCESS_ATTACH) {
     // Hang on to this DLL's instance handle.
-    tapu::win32::set_instance(hinstDLL);
+    fant::win32::set_instance(hinstDLL);
     DebugPrint(_T("glTf plugin loaded."));
-    DisableThreadLibraryCalls(tapu::win32::get_instance());
+    DisableThreadLibraryCalls(fant::win32::get_instance());
   }
   return (TRUE);
 }
@@ -33,7 +33,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL,
 // This function returns a string that describes the DLL and where the user
 // could purchase the DLL if they don't have it.
 __declspec(dllexport) const TCHAR *LibDescription() {
-  return tapu::win32::get_string_resource(IDS_PLUGIN_DESCRIPTION);
+  return fant::win32::get_string_resource(IDS_PLUGIN_DESCRIPTION);
 }
 
 // This function returns the number of plug-in classes this DLL

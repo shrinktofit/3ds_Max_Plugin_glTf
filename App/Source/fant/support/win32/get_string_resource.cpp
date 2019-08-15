@@ -1,9 +1,9 @@
 
 #include <Windows.h>
-#include <tapu/support/win32/get_string_resource.h>
-#include <tapu/support/win32/instance.h>
+#include <fant/support/win32/get_string_resource.h>
+#include <fant/support/win32/instance.h>
 
-namespace tapu::win32 {
+namespace fant::win32 {
 MCHAR *get_string_resource(int id_) {
   static MCHAR buf[1024];
   auto hInstance = get_instance();
@@ -11,4 +11,4 @@ MCHAR *get_string_resource(int id_) {
     return LoadString(hInstance, id_, buf, sizeof(buf)) ? buf : nullptr;
   return nullptr;
 }
-} // namespace tapu::win32
+} // namespace fant::win32

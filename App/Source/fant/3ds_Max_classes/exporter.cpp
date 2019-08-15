@@ -1,69 +1,49 @@
 
-#pragma once
-
-#include <Max.h>
-#include <cstdint>
-#include <fx/gltf.h>
+#include "resource.h"
+#include <array>
+#include <charconv>
+#include <decomp.h>
+#include <fant/3ds_Max_classes/exporter.h>
+#include <fant/3ds_Max_classes/exporter/export_settings.h>
+#include <fant/3ds_Max_classes/exporter/glTF_creator.h>
+#include <fant/support/win32/get_string_resource.h>
+#include <fant/support/win32/instance.h>
+#include <fant/support/win32/mchar_to_utf8.h>
+#include <filesystem>
+#include <fstream>
 #include <gsl/span>
-#include <locale>
-#include <string>
+#include <iskin.h>
+#include <list>
+#include <memory>
+#include <modstack.h>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <sstream>
 #include <string_view>
-#include <tapu/3ds_Max_classes/exporter/export_settings.h>
-#include <tapu/3ds_Max_classes/exporter/vertex_list.h>
-#include <tapu/support/win32/mchar_to_utf8.h>
+#include <unordered_map>
+#include <vector>
 
-std::string to_glTF_string(std::u8string_view string_) {
-  std::locale locale(std::locale::empty(), new std::codecvt<char32_t, char, std::mbstate_t>());
-  return std::string(reinterpret_cast<const char *>(string_.data()),
-                     string_.size());
-}
-
-template <fx::gltf::Accessor::ComponentType ComponentType>
-struct glTf_component_type_traits {};
-
-template <>
-struct glTf_component_type_traits<
-    fx::gltf::Accessor::ComponentType::UnsignedByte> {
-  using storage_type = std::uint8_t;
+namespace fant {
+enum class glTf_extension {
+  gltf,
+  glb,
 };
 
-template <>
-struct glTf_component_type_traits<
-    fx::gltf::Accessor::ComponentType::UnsignedShort> {
-  using storage_type = std::uint16_t;
+struct glTf_extension_info {
+  glTf_extension extension;
+  const MCHAR *rep;
 };
 
-template <>
-struct glTf_component_type_traits<
-    fx::gltf::Accessor::ComponentType::UnsignedInt> {
-  using storage_type = std::uint32_t;
+std::array<glTf_extension_info, 2> glTf_extension_info_list{
+    glTf_extension_info{glTf_extension::gltf, _M("GLTF")},
+    glTf_extension_info{glTf_extension::glb, _M("GLB")}};
+
+enum class attribute_semantic {
+  position,
+  normal,
+  texcoord,
+  color,
 };
-
-class glTf_overflow : public std::exception {
-public:
-  enum class target_type {
-    accessor_count,
-    buffer_count,
-    buffer_view_count,
-    mesh_count,
-    node_count,
-    scene_count,
-
-    buffer,
-  };
-
-  glTf_overflow(target_type target_) : _target(target_) {
-  }
-
-  target_type target() const {
-    return _target;
-  }
-
-private:
-  target_type _target;
-};
-
-template <class T> struct dependent_false : std::false_type {};
 
 bool undo_parents_offset(INode &node_, Point3 &point_, Quat &offset_rotation_) {
   auto parent = node_.GetParentNode();
@@ -92,27 +72,91 @@ Matrix3 get_local_node_tm(INode &max_node_, TimeValue time_) {
   }
 }
 
-namespace tapu {
-class glTf_creator {
+class main_visitor : public ITreeEnumProc {
 public:
-  using node_handle = std::uint32_t;
-
-  using mesh_handle = std::uint32_t;
-
-  using animation_handle = std::uint32_t;
-
-  using scene_handle = std::uint32_t;
-
-  glTf_creator(const export_settings &settings_, Interface &max_interface_)
-      : _settings(settings_), _maxInterface(max_interface_) {
+  main_visitor(glTF::document &document_, const export_settings &settings_)
+      : _document(document_), _glTFScene(document_.make<glTF::scene>()),
+        _settings(settings_) {
+    _document.default_scene(_glTFScene);
   }
 
-  scene_handle add_scene() {
-    fx::gltf::Scene glTfScene;
-    return _addScene(std::move(glTfScene));
+  int callback(INode *max_node_) override {
+    auto glTFNode = _convertNode(*max_node_);
+
+    if (!max_node_->IsRootNode()) {
+      auto parentMaxNode = max_node_->GetParentNode();
+      auto rParentGlTfNode = _nodeMaps.find(parentMaxNode);
+      if (rParentGlTfNode != _nodeMaps.end()) {
+        rParentGlTfNode->second->add_child(glTFNode);
+      } else {
+        _glTFScene->add_node(glTFNode);
+      }
+    }
+
+    auto object = max_node_->EvalWorldState(0).obj;
+    if (object->CanConvertToType({TRIOBJ_CLASS_ID, 0})) {
+      auto triObject = static_cast<TriObject *>(
+          object->ConvertToType(0, {TRIOBJ_CLASS_ID, 0}));
+      if (triObject) {
+        auto glTFMesh = _convertTriObj(*triObject);
+        glTFNode->mesh(glTFMesh);
+        if (triObject != object) {
+          triObject->DeleteMe();
+        }
+      }
+    }
+
+    auto objectRef = max_node_->GetObjectRef();
+    if (objectRef->SuperClassID() == GEN_DERIVOB_CLASS_ID) {
+      auto derivedObject = reinterpret_cast<IDerivedObject *>(objectRef);
+      const auto numModifiers = derivedObject->NumModifiers();
+      for (std::remove_const_t<decltype(numModifiers)> iModifier = 0;
+           iModifier < numModifiers; ++iModifier) {
+        auto modifier = derivedObject->GetModifier(iModifier);
+        auto skin = reinterpret_cast<ISkin *>(modifier->GetInterface(I_SKIN));
+        if (!skin) {
+          continue;
+        }
+
+        auto skinContextData = skin->GetContextInterface(max_node_);
+        if (!skinContextData) {
+          continue;
+        }
+
+        const auto numPoints = skinContextData->GetNumPoints();
+        for (std::remove_const_t<decltype(numPoints)> iPoint = 0;
+             iPoint < numPoints; ++iPoint) {
+          const auto numAffectBones =
+              skinContextData->GetNumAssignedBones(iPoint);
+          for (std::remove_const_t<decltype(numAffectBones)> iAffectBone = 0;
+               iAffectBone != numAffectBones; ++iAffectBone) {
+            auto affectBoneIndex =
+                skinContextData->GetAssignedBone(iPoint, iAffectBone);
+            auto weight = skinContextData->GetBoneWeight(iPoint, iAffectBone);
+          }
+        }
+
+        const auto numBones = skin->GetNumBones();
+        for (std::remove_const_t<decltype(numBones)> iBone = 0;
+             iBone < numBones; ++iBone) {
+          auto boneProperty = skin->GetBoneProperty(iBone);
+        }
+      }
+    }
+
+    _nodeMaps.emplace(max_node_, glTFNode);
+    _readAnimation(*max_node_);
+    return TREE_CONTINUE;
   }
 
-  node_handle add_node(INode &max_node_) {
+private:
+  glTF::document &_document;
+  const export_settings &_settings;
+  std::unordered_map<INode *, glTF::asset_ptr<glTF::node>> _nodeMaps;
+  glTF::asset_ptr<glTF::scene> _glTFScene;
+  glTF::asset_ptr<glTF::buffer> _mainBuffer;
+
+  glTF::asset_ptr<glTF::node> _convertNode(INode &max_node_) {
     auto maxNodeName = std::basic_string_view<MCHAR>(max_node_.GetName());
     auto name = win32::mchar_to_utf8(maxNodeName);
 
@@ -134,23 +178,26 @@ public:
     Quat rot;
     DecomposeMatrix(objectLocalTM, pos, rot, scale);
 
-    fx::gltf::Node glTfNode;
-    glTfNode.name = name;
+    auto glTFNode = _document.make<glTF::node>();
+    glTFNode->name(name);
+
     if (pos != Point3::Origin) {
-      _writePoint3(glTfNode.translation.data(), pos);
+      glTFNode->set_position(pos.x, pos.y, pos.z);
     }
+
     if (scale != Point3(1, 1, 1)) {
-      _writePoint3(glTfNode.scale.data(), scale);
+      glTFNode->set_scale(scale.x, scale.y, scale.z);
     }
+
     if (!rot.IsIdentity()) {
       rot.Normalize();
-      _writeQuat(glTfNode.rotation.data(), rot);
+      glTFNode->set_rotation(rot.x, rot.y, rot.z, rot.w);
     }
 
-    return _addNode(std::move(glTfNode));
+    return glTFNode;
   }
 
-  mesh_handle add_tri_object(TriObject &tri_obj_) {
+  glTF::asset_ptr<glTF::mesh> _convertTriObj(TriObject &tri_obj_) {
     auto &mesh = tri_obj_.GetMesh();
     auto maxNodeName = std::basic_string_view<MCHAR>(
         tri_obj_.NodeName(), tri_obj_.NodeName().Length());
@@ -201,215 +248,74 @@ public:
                     gsl::make_span(indices.get(), vertices.size()));
   }
 
-  void add_node_animation(INode &max_node_, node_handle node_) {
+  glTF::asset_ptr<glTF::animation> _readAnimation(INode &max_node_) {
     auto transformController = max_node_.GetTMController();
     auto positionTrack = _readPositionTrack(max_node_, *transformController);
     auto scaleTrack = _readScaleTrack(max_node_, *transformController);
     auto rotationTrack = _readRotationTrack(max_node_, *transformController);
   }
 
-  void set_default_scene(scene_handle scene_) {
-    assert(scene_ < _glTfDocument.scenes.size());
-    _glTfDocument.scene = scene_;
+  void _writePoint3(float *output_, const Point3 &p_) {
+    output_[0] = p_.x;
+    output_[1] = p_.y;
+    output_[2] = p_.z;
   }
 
-  void set_root_node(scene_handle scene_, node_handle node_) {
-    assert(scene_ < _glTfDocument.scenes.size());
-    assert(node_ < _glTfDocument.nodes.size());
-    _glTfDocument.scenes[scene_].nodes.push_back(node_);
+  void _writeQuat(float *output_, const Quat &q_) {
+    output_[0] = q_.x;
+    output_[1] = q_.y;
+    output_[2] = q_.z;
+    output_[2] = q_.w;
   }
 
-  void set_parent(node_handle child_, node_handle parent_) {
-    assert(child_ < _glTfDocument.nodes.size());
-    assert(parent_ < _glTfDocument.nodes.size());
-    _glTfDocument.nodes[parent_].children.push_back(child_);
+  Matrix3 _getObjectOffsetTM(INode &node_) {
+    Matrix3 tm(1);
+    Point3 pos = node_.GetObjOffsetPos();
+    tm.PreTranslate(pos);
+    Quat quat = node_.GetObjOffsetRot();
+    PreRotateMatrix(tm, quat);
+    ScaleValue scaleValue = node_.GetObjOffsetScale();
+    ApplyScaling(tm, scaleValue);
+    return tm;
   }
 
-  void set_mesh(node_handle node_, mesh_handle mesh_) {
-    assert(node_ < _glTfDocument.nodes.size());
-    assert(mesh_ < _glTfDocument.meshes.size());
-    _glTfDocument.nodes[node_].mesh = mesh_;
-  }
-
-  void commit() {
-    if (_bufferSegments.length() == 0) {
-      (void)_bufferSegments.allocate_view(1, 1);
-    }
-    _glTfDocument.buffers.emplace_back();
-    auto &mainBuffer = _glTfDocument.buffers.back();
-    mainBuffer.data.resize(_bufferSegments.length());
-    _bufferSegments.read_all(
-        reinterpret_cast<std::byte *>(mainBuffer.data.data()));
-    mainBuffer.byteLength = _bufferSegments.length();
-  }
-
-  /// <summary>
-  /// Save as .glb format.
-  /// </summary>
-  /// <param name="path_"></param>
-  /// <param name="binary_dir_name_"></param>
-  /// <param name="binary_ext_"></param>
-  void save(std::u8string_view path_,
-            std::u8string_view binary_dir_name_,
-            std::u8string_view binary_ext_) {
-    for (decltype(_glTfDocument.buffers)::size_type iBuffer = 0;
-         iBuffer != _glTfDocument.buffers.size(); ++iBuffer) {
-      auto &buffer = _glTfDocument.buffers[iBuffer];
-      std::basic_stringstream<char8_t> urlss;
-      urlss << u8"./" << binary_dir_name_;
-      if (_glTfDocument.buffers.size() != 1) {
-        std::array<char, sizeof(iBuffer) * CHAR_BIT> indexChars;
-        auto result = std::to_chars(
-            indexChars.data(), indexChars.data() + indexChars.size(), iBuffer);
-        assert(result.ec == std::errc());
-        // TODO: indexString is not guarenteen as UTF8.
-        auto indexString = std::u8string_view(
-            reinterpret_cast<const char8_t *>(indexChars.data()),
-            result.ptr - indexChars.data());
-        urlss << u8"-" << indexString;
-      }
-      urlss << binary_ext_;
-      buffer.uri =
-          to_glTF_string(std::filesystem::path(urlss.str()).u8string());
-    }
-    _doSave(path_, false);
-  }
-
-  /// <summary>
-  /// Save as .gltf file.
-  /// </summary>
-  /// <param name="path_"></param>
-  void save(std::u8string_view path_) {
-    for (auto &buffer : _glTfDocument.buffers) {
-      buffer.uri.clear();
-    }
-    _doSave(path_, true);
-  }
-
-private:
-  using _buffer_type = std::vector<std::byte>;
-
-  class _unmerged_buffer_segments {
-  public:
-    _unmerged_buffer_segments(std::uint32_t index_) : _index(index_) {
-    }
-
-    std::pair<fx::gltf::BufferView, std::byte *>
-    allocate_view(std::uint32_t size_, std::uint32_t alignment_) {
-      if (alignment_ != 0) {
-        if (auto remainder = _length % alignment_; remainder != 0) {
-          auto complement = alignment_ - remainder;
-          _length += complement;
-          _buffers.emplace_back(complement);
-        }
-      }
-      fx::gltf::BufferView bufferView;
-      bufferView.buffer = _index;
-      bufferView.byteOffset = _length;
-      bufferView.byteLength = size_;
-      bufferView.byteStride = 0;
-      _length += size_;
-      _buffers.emplace_back(size_);
-      return {bufferView, _buffers.back().data()};
-    }
-
-    std::uint32_t index() {
-      return _index;
-    }
-
-    std::uint32_t length() {
-      return _length;
-    }
-
-    void read_all(std::byte *output_) {
-      for (auto &buffer : _buffers) {
-        std::copy(buffer.begin(), buffer.end(), output_);
-        output_ += buffer.size();
-      }
-    }
-
-  private:
-    std::uint32_t _index;
-    std::uint32_t _length = 0;
-    std::list<_buffer_type> _buffers;
-  };
-
-  _unmerged_buffer_segments _bufferSegments = 0;
-  fx::gltf::Document _glTfDocument;
-  const export_settings &_settings;
-  Interface &_maxInterface;
-
-  void _doSave(std::u8string_view path_, bool binary_) try {
-    auto path = std::filesystem::path(path_).string();
-    fx::gltf::Save(_glTfDocument, path, binary_);
-  } catch (const std::exception &exception_) {
-    DebugPrint(L"glTf-exporter: exception occured when save:");
-    _printException(exception_);
-  } catch (...) {
-    DebugPrint(L"glTf-exporter: Unknown exception.");
-  }
-
-  void _printException(const std::exception &e, int level = 0) {
-    std::cerr << std::string(level, ' ') << "exception: " << e.what() << '\n';
-    try {
-      std::rethrow_if_nested(e);
-    } catch (const std::exception &e) {
-      _printException(e, level + 1);
-    } catch (...) {
-    }
-  }
-
-  std::uint32_t _addMesh(std::string_view name_,
-                         const vertex_list &vertex_list_,
-                         gsl::span<vertex_list::size_type> indices_) {
-    auto indicesAccessorIndex = _addIndices(indices_);
-    fx::gltf::Primitive primitive;
-    primitive.mode = fx::gltf::Primitive::Mode::Triangles;
-    primitive.indices = indicesAccessorIndex;
+  glTF::asset_ptr<glTF::mesh>
+  _addMesh(std::u8string_view name_,
+           const vertex_list &vertex_list_,
+           gsl::span<vertex_list::size_type> indices_) {
+    auto indicesAccessor = _addIndices(indices_);
 
     auto szMainVB = 3 * 4 * vertex_list_.size();
-    auto [mainVBView, mainVB] = _bufferSegments.allocate_view(szMainVB, 4);
-    auto mainVBViewIndex = _addBufferView(std::move(mainVBView));
+    auto mainVBView =
+        _document.make<glTF::buffer_view>(_mainBuffer, szMainVB, 4);
 
-    fx::gltf::Accessor positionAccessor;
-    positionAccessor.bufferView = mainVBViewIndex;
-    positionAccessor.type = fx::gltf::Accessor::Type::Vec3;
-    positionAccessor.componentType = fx::gltf::Accessor::ComponentType::Float;
-    positionAccessor.count = vertex_list_.size();
-    positionAccessor.min = {std::numeric_limits<float>::max(),
-                            std::numeric_limits<float>::max(),
-                            std::numeric_limits<float>::max()};
-    positionAccessor.max = {std::numeric_limits<float>::lowest(),
-                            std::numeric_limits<float>::lowest(),
-                            std::numeric_limits<float>::lowest()};
-    auto &min = positionAccessor.min;
-    auto &max = positionAccessor.max;
+    auto positionAccessor = _document.make<glTF::accessor>(
+        mainVBView, 0, glTF::accessor::component_type::the_float,
+        glTF::accessor::type_type::vec3, vertex_list_.size());
     for (vertex_list::size_type iVertex = 0; iVertex != vertex_list_.size();
          ++iVertex) {
       auto &v = vertex_list_[iVertex].vertex();
-      min[0] = std::min(v.x, min[0]);
-      min[1] = std::min(v.y, min[1]);
-      min[2] = std::min(v.z, min[2]);
-      max[0] = std::max(v.x, max[0]);
-      max[1] = std::max(v.y, max[1]);
-      max[2] = std::max(v.z, max[2]);
       auto pOutput = reinterpret_cast<float *>(
-          mainVB + static_cast<std::size_t>(3u * 4u * iVertex));
+          mainVBView->data() + static_cast<std::size_t>(3u * 4u * iVertex));
       pOutput[0] = v.x;
       pOutput[1] = v.y;
       pOutput[2] = v.z;
     }
-    auto positionAccessorIndex = _addAccessor(std::move(positionAccessor));
-    primitive.attributes.emplace(to_glTF_string(u8"POSITION"),
-                                 positionAccessorIndex);
 
-    fx::gltf::Mesh mesh;
-    mesh.name = name_;
-    mesh.primitives = {std::move(primitive)};
-    return _addMesh(std::move(mesh));
+    glTF::primitive primitive{glTF::primitive::mode_type::triangles};
+    primitive.indices(indicesAccessor);
+    primitive.emplace_attribute(glTF::primitive::semantic_type::position,
+                                positionAccessor);
+
+    auto glTFMesh = _document.make<glTF::mesh>();
+    glTFMesh->name(name_);
+    glTFMesh->push_primitive(primitive);
+
+    return glTFMesh;
   }
 
-  std::uint32_t _addIndices(gsl::span<vertex_list::size_type> indices_) {
+  glTF::asset_ptr<glTF::accessor>
+  _addIndices(gsl::span<vertex_list::size_type> indices_) {
     static_assert(export_settings::index_type_setting::unsigned_8 ==
                   static_cast<export_settings::index_type_setting>(0));
     static_assert(export_settings::index_type_setting::unsigned_16 ==
@@ -473,114 +379,36 @@ private:
     }
     }
 
-    auto [bufferView, bufferViewData] = _bufferSegments.allocate_view(
-        _ensureNotOverflow<std::uint32_t>(glTf_overflow::target_type::buffer,
-                                          sizeofIndex * indices_.size()),
-        sizeofIndex);
+    auto bufferView = _document.make<glTF::buffer_view>(
+        _mainBuffer, sizeofIndex * indices_.size(), sizeofIndex, 0);
+    bufferView->target(glTF::buffer_view::target_type::element_array_buffer);
 
-    auto glTfComponentType = fx::gltf::Accessor::ComponentType::None;
+    std::optional<glTF::accessor::component_type> glTfComponentType;
     switch (*usingType) {
     case export_settings::index_type_setting::unsigned_8: {
-      glTfComponentType = fx::gltf::Accessor::ComponentType::UnsignedByte;
+      glTfComponentType = glTF::accessor::component_type::unsigned_byte;
       std::copy_n(indices_.data(), indices_.size(),
-                  reinterpret_cast<std::uint8_t *>(bufferViewData));
+                  reinterpret_cast<std::uint8_t *>(bufferView->data()));
       break;
     }
     case export_settings::index_type_setting::unsigned_16: {
-      glTfComponentType = fx::gltf::Accessor::ComponentType::UnsignedShort;
+      glTfComponentType = glTF::accessor::component_type::unsigned_short;
       std::copy_n(indices_.data(), indices_.size(),
-                  reinterpret_cast<std::uint16_t *>(bufferViewData));
+                  reinterpret_cast<std::uint16_t *>(bufferView->data()));
       break;
     }
     case export_settings::index_type_setting::unsigned_32: {
-      glTfComponentType = fx::gltf::Accessor::ComponentType::UnsignedInt;
+      glTfComponentType = glTF::accessor::component_type::unsigned_int;
       std::copy_n(indices_.data(), indices_.size(),
-                  reinterpret_cast<std::uint32_t *>(bufferViewData));
+                  reinterpret_cast<std::uint32_t *>(bufferView->data()));
       break;
     }
     }
 
-    bufferView.target = fx::gltf::BufferView::TargetType::ElementArrayBuffer;
-    auto bufferViewIndex = _addBufferView(std::move(bufferView));
-
-    fx::gltf::Accessor accessor;
-    accessor.componentType = glTfComponentType;
-    accessor.count = static_cast<std::uint32_t>(indices_.size());
-    accessor.type = fx::gltf::Accessor::Type::Scalar;
-    accessor.bufferView = bufferViewIndex;
-
-    return _addAccessor(std::move(accessor));
-  }
-
-  std::uint32_t _addScene(fx::gltf::Scene &&scene_) {
-    auto result = _glTfDocument.scenes.size();
-    _glTfDocument.scenes.push_back(std::move(scene_));
-    return _ensureAssetCount(glTf_overflow::target_type::scene_count, result);
-  }
-
-  std::uint32_t _addNode(fx::gltf::Node &&node_) {
-    auto result = _glTfDocument.nodes.size();
-    _glTfDocument.nodes.push_back(std::move(node_));
-    return _ensureAssetCount(glTf_overflow::target_type::node_count, result);
-  }
-
-  std::uint32_t _addMesh(fx::gltf::Mesh &&mesh_) {
-    auto result = _glTfDocument.meshes.size();
-    _glTfDocument.meshes.push_back(std::move(mesh_));
-    return _ensureAssetCount(glTf_overflow::target_type::mesh_count, result);
-  }
-
-  std::uint32_t _addBufferView(fx::gltf::BufferView &&buffer_view_) {
-    auto result = _glTfDocument.bufferViews.size();
-    _glTfDocument.bufferViews.push_back(std::move(buffer_view_));
-    return _ensureAssetCount(glTf_overflow::target_type::buffer_view_count,
-                             result);
-  }
-
-  std::uint32_t _addAccessor(fx::gltf::Accessor &&accessor_) {
-    auto result = _glTfDocument.accessors.size();
-    _glTfDocument.accessors.push_back(std::move(accessor_));
-    return _ensureAssetCount(glTf_overflow::target_type::accessor_count,
-                             result);
-  }
-
-  template <typename UInt>
-  std::uint32_t _ensureAssetCount(glTf_overflow::target_type target_,
-                                  UInt count_) {
-    return _ensureNotOverflow<std::uint32_t>(target_, count_);
-  }
-
-  template <typename CapacityInt, typename UInt>
-  std::uint32_t _ensureNotOverflow(glTf_overflow::target_type target_,
-                                   UInt count_) {
-    if (count_ > std::numeric_limits<CapacityInt>::max()) {
-      throw glTf_overflow(target_);
-    }
-    return static_cast<CapacityInt>(count_);
-  }
-
-  void _writePoint3(float *output_, const Point3 &p_) {
-    output_[0] = p_.x;
-    output_[1] = p_.y;
-    output_[2] = p_.z;
-  }
-
-  void _writeQuat(float *output_, const Quat &q_) {
-    output_[0] = q_.x;
-    output_[1] = q_.y;
-    output_[2] = q_.z;
-    output_[2] = q_.w;
-  }
-
-  Matrix3 _getObjectOffsetTM(INode &node_) {
-    Matrix3 tm(1);
-    Point3 pos = node_.GetObjOffsetPos();
-    tm.PreTranslate(pos);
-    Quat quat = node_.GetObjOffsetRot();
-    PreRotateMatrix(tm, quat);
-    ScaleValue scaleValue = node_.GetObjOffsetScale();
-    ApplyScaling(tm, scaleValue);
-    return tm;
+    auto accessor = _document.make<glTF::accessor>(
+        bufferView, 0, glTfComponentType, glTF::accessor::type_type::scalar,
+        indices_.size());
+    return accessor;
   }
 
   enum class _track_kind {
@@ -798,4 +626,108 @@ private:
            _approxEqual(lhs_.z, rhs_.z) && _approxEqual(lhs_.w, rhs_.w);
   }
 };
-} // namespace tapu
+
+void *glTf_exporter::class_description::Create(BOOL) {
+  return new glTf_exporter();
+}
+
+const MCHAR *glTf_exporter::class_description::ClassName() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_CLASS_NAME);
+}
+
+Class_ID glTf_exporter::class_description::ClassID() {
+  static Class_ID id = Class_ID(0x4b4b76a0, 0x68434828);
+  return id;
+}
+
+const MCHAR *glTf_exporter::class_description::Category() {
+  return _M("");
+}
+
+const MCHAR *glTf_exporter::class_description::InternalName() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_INTERNAL_NAME);
+}
+
+HINSTANCE glTf_exporter::class_description::HInstance() {
+  return win32::get_instance();
+}
+
+int glTf_exporter::ExtCount() {
+  return static_cast<int>(glTf_extension_info_list.size());
+}
+
+const MCHAR *glTf_exporter::Ext(int i_) {
+  if (i_ < 0 || i_ >= glTf_extension_info_list.size()) {
+    return _M("");
+  } else {
+    return glTf_extension_info_list[i_].rep;
+  }
+}
+
+const MCHAR *glTf_exporter::LongDesc() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_LONG_DESCRIPTION);
+}
+
+const MCHAR *glTf_exporter::ShortDesc() {
+  auto result = win32::get_string_resource(IDS_GLTF_EXPORTER_SHORT_DESCRIPTION);
+  return result;
+}
+
+const MCHAR *glTf_exporter::AuthorName() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_AUTHOR_NAME);
+}
+
+const MCHAR *glTf_exporter::CopyrightMessage() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_COPYRIGHT_MESSAGE);
+}
+
+const MCHAR *glTf_exporter::OtherMessage1() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_OTHER_MESSAGE_1);
+}
+
+const MCHAR *glTf_exporter::OtherMessage2() {
+  return win32::get_string_resource(IDS_GLTF_EXPORTER_OTHER_MESSAGE_2);
+}
+
+unsigned int glTf_exporter::Version() {
+  return 100;
+}
+
+void glTf_exporter::ShowAbout(HWND hWnd) {
+  MessageBox(hWnd, win32::get_string_resource(IDS_GLTF_EXPORTER_ABOUT),
+             _M("About"), MB_OK);
+}
+
+int glTf_exporter::DoExport(const MCHAR *name,
+                            ExpInterface *ei,
+                            Interface *i,
+                            BOOL suppressPrompts,
+                            DWORD options) {
+  auto path = std::filesystem::path(name);
+
+  export_settings settings;
+  settings.index = export_settings::index_setting::at_least;
+  settings.index_type = export_settings::index_type_setting::unsigned_8;
+
+  glTF::document glTFDocument;
+  main_visitor visitor{glTFDocument, settings};
+  ei->theScene->EnumTree(&visitor);
+  // creator.commit();
+
+  auto extStr = path.extension().string();
+  auto extStrLower = extStr;
+  std::transform(extStrLower.begin(), extStrLower.end(), extStrLower.begin(),
+                 ::tolower);
+  auto u8Name = path.u8string();
+  if (extStrLower == ".glb") {
+    creator.save(u8Name);
+  } else {
+    creator.save(u8Name, path.stem().u8string(), u8".BIN");
+  }
+  return 1;
+}
+
+BOOL glTf_exporter::SupportsOptions(int ext, DWORD options) {
+  return 1;
+}
+} // namespace fant

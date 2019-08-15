@@ -1,7 +1,7 @@
 
 #pragma once
 
-namespace tapu {
+namespace fant {
 struct export_settings {
   enum class index_type_setting {
     unsigned_8,
@@ -14,4 +14,4 @@ struct export_settings {
     at_least,
   } index;
 };
-} // namespace tapu
+} // namespace fant

@@ -5,7 +5,7 @@
 #include <impexp.h>
 #include <iparamb2.h>
 
-namespace tapu {
+namespace fant {
 class glTf_exporter : public SceneExport {
 public:
   class class_description;
@@ -61,4 +61,4 @@ public:
 
   virtual HINSTANCE HInstance();
 };
-} // namespace tapu
+} // namespace fant

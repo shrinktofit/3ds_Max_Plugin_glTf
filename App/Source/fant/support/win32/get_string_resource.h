@@ -3,6 +3,6 @@
 
 #include <strbasic.h>
 
-namespace tapu::win32 {
+namespace fant::win32 {
 MCHAR *get_string_resource(int id_);
 }
