@@ -1,3 +1,5 @@
+add_requires("nlohmann_json")
+add_requires("vcpkg::ms-gsl")
 target("3dsMax-glTF-plugin")
     set_kind("shared")
     set_default(true)
@@ -6,7 +8,7 @@ target("3dsMax-glTF-plugin")
     add_defines("UNICODE", "_UNICODE", "_USRDLL", "NOMINMAX", "PUGIXML_WCHAR_MODE")
     add_cxxflags("/std:c++latest") -- C++ 20 is needed
     add_includedirs(path.join("App", "Source"), path.join("App", "Resource"))
-    add_packages("nlohmann_json")
+    add_packages("nlohmann_json", "ms-gsl")
     on_load(function (target)
         import("find3dsMaxSDK")
         adsk3dsMaxSDKHome = find3dsMaxSDK.find()
@@ -18,4 +20,8 @@ target("3dsMax-glTF-plugin")
             target:add("linkdirs", adsk3dsMaxLibDir)
             target:add("links", 'core')
         end
+
+        import("lib.detect.find_path")
+        local gslIncludeDir = find_path("gsl/span")
+        print("gslIncludeDir " .. gslIncludeDir)
     end)
