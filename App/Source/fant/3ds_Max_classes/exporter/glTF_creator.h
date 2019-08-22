@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 
 std::string to_glTF_string(std::u8string_view string_) {
   return std::string(reinterpret_cast<const char *>(string_.data()),
@@ -66,6 +67,14 @@ public:
     _name = name_;
   }
 
+  glTF_json serialize() const {
+    glTF_json result;
+    if (!_name.empty()) {
+      result["name"] = _name;
+    }
+    return result;
+  }
+
 private:
   std::u8string _name;
   std::unordered_map<std::u8string, glTF_json> _extensions;
@@ -89,14 +98,10 @@ public:
         _buffers.emplace_back(complement);
       }
     }
-    fx::gltf::BufferView bufferView;
-    bufferView.buffer = _index;
-    bufferView.byteOffset = _length;
-    bufferView.byteLength = size_;
-    bufferView.byteStride = 0;
+    auto offset = _length;
     _length += size_;
     _buffers.emplace_back(size_);
-    return {_buffers.back().data(), bufferView };
+    return {_buffers.back().data(), offset};
   }
 
   void read_all(std::byte *output_) {
@@ -200,6 +205,41 @@ private:
   component_type _componentType;
   type_type _type;
   size_type _count;
+};
+
+class image : public asset_base {
+public:
+  void source(std::u8string_view url_) {
+    _source = std::u8string(url_.data(), url_.size());
+  }
+
+  void source(asset_ptr<buffer_view> buffer_view_) {
+    _source = buffer_view_;
+  }
+
+  glTF_json serialize() const {
+    auto result = asset_base::serialize();
+    std::visit(
+        [&](const auto &real_source_) {
+          using RealSource = std::decay_t<decltype(real_source_)>;
+          if constexpr (std::is_same_v<RealSource, std::u8string>) {
+            result["uri"] = real_source_;
+          } else if constexpr (std::is_same_v<RealSource,
+                                              asset_ptr<buffer_view>>) {
+            result["bufferView"] = 0;
+          }
+        },
+        _source);
+    return result;
+  }
+
+private:
+  std::variant<std::monostate, std::u8string, asset_ptr<buffer_view>> _source;
+};
+
+class texture : public asset_base {
+public:
+private:
 };
 
 class material : public asset_base {};
@@ -321,14 +361,36 @@ private:
 class document {
 public:
   template <typename Asset, typename... Args>
-  asset_ptr<Asset> make(Args&& ... args) {
+  asset_ptr<Asset> make(Args &&... args) {
     auto ptr = std::make_shared<Asset>(std::forward<Args>(args)...);
     std::get<_list_of_assets<Asset>>(_hub).push_back(ptr);
     return ptr;
   }
 
+  template <typename Asset> asset_ptr<Asset> get(std::uint32_t index_) {
+    return std::get<_list_of_assets<Asset>>(_hub)[index_];
+  }
+
+  template <typename Asset> std::uint32_t get_size() {
+    return std::get<_list_of_assets<Asset>>(_hub).size();
+  }
+
   void default_scene(asset_ptr<scene> scene_) {
     _defaultScene = scene_;
+  }
+
+  template <typename Asset> std::uint32_t index_of(asset_ptr<Asset> asset) {
+    const auto &assets = std::get<_list_of_assets<Asset>>(_hub);
+    if (auto r = std::find(assets.begin(), assets.end(), asset);
+        r != assets.end()) {
+      return std::distance(assets.begin(), r);
+    }
+    throw std::out_of_range;
+  }
+
+  glTF_json serialize() const {
+    glTF_json result;
+    return result;
   }
 
 private:
@@ -338,15 +400,96 @@ private:
   using _list_of_assets = std::vector<asset_ptr<Asset>>;
 
   std::tuple<_list_of_assets<buffer>,
-    _list_of_assets<buffer_view>,
-    _list_of_assets<accessor>,
-    _list_of_assets<mesh>,
-    _list_of_assets<material>,
-    _list_of_assets<skin>,
-    _list_of_assets<node>,
-    _list_of_assets<scene>>
-    _hub;
+             _list_of_assets<buffer_view>,
+             _list_of_assets<accessor>,
+             _list_of_assets<mesh>,
+             _list_of_assets<material>,
+             _list_of_assets<skin>,
+             _list_of_assets<node>,
+             _list_of_assets<scene>>
+      _hub;
 };
+
+using chunk_type_t = std::uint32_t;
+
+inline constexpr chunk_type_t json_chunk = 0x4E4F534A;
+
+inline constexpr std::byte json_chunk_padding_schema = std::byte(0x20);
+
+inline constexpr chunk_type_t buffer_chunk = 0x4E4F534A;
+
+inline constexpr std::byte buffer_chunk_padding_schema = std::byte(0);
+
+struct chunk {
+  chunk_type_t type;
+  std::byte padding_schema;
+  gsl::span<const std::byte> data;
+};
+
+chunk make_json_chunk(std::u8string_view gltf_json_str_) {
+  return chunk{
+      json_chunk, json_chunk_padding_schema,
+      gsl::make_span(reinterpret_cast<const std::byte *>(gltf_json_str_.data()),
+                     gltf_json_str_.size())};
+}
+
+namespace impl {
+template <typename Int>
+void write_little_endian(Int value_, std::byte *output_) {
+  static_assert(std::endian::native == std::endian::little);
+  *reinterpret_cast<Int *>(output_) = value_;
+}
+} // namespace impl
+
+template <typename ChunkIterator>
+std::vector<std::byte> write_glb(ChunkIterator first_chunk_,
+                                 ChunkIterator last_chunk_) {
+  std::uint32_t resultSize = 12;
+  for (auto ichunk = first_chunk_; ichunk != last_chunk_; ++ichunk) {
+    resultSize += ichunk->data.size();
+    if (resultSize % 4 != 0) {
+      resultSize = (resultSize / 4 + 1) * 4;
+    }
+  }
+
+  std::vector<std::byte> result(resultSize);
+  auto poutput = result.data();
+  // Magic
+  impl::write_little_endian(static_cast<std::uint32_t>(0x46546C67), poutput);
+  poutput += 4;
+  // Version
+  impl::write_little_endian(static_cast<std::uint32_t>(2), poutput);
+  poutput += 4;
+  // Length
+  impl::write_little_endian(static_cast<std::uint32_t>(resultSize), poutput);
+  poutput += 4;
+  for (auto ichunk = first_chunk_; ichunk != last_chunk_; ++ichunk) {
+    // Chunk length
+    impl::write_little_endian(static_cast<std::uint32_t>(ichunk->data.size()),
+                              poutput);
+    poutput += 4;
+    // Chunk type
+    impl::write_little_endian(static_cast<std::uint32_t>(ichunk->type),
+                              poutput);
+    poutput += 4;
+    // Chunk data
+    std::copy_n(ichunk->data.data(), ichunk->data.size(), poutput);
+    poutput += ichunk->data.size();
+    // Trailling padding
+    if (auto nWritten = poutput - result.data(); nWritten % 4 != 0) {
+      std::byte paddingByte = 0;
+      if (ichunk->type == json_chunk) {
+        paddingByte = 0x20;
+      }
+      auto nPadding = 4 - nWritten % 4;
+      for (decltype(nWritten) iPadding = 0; iPadding < nPadding; ++iPadding) {
+        *poutput++ = paddingByte;
+      }
+    }
+  }
+
+  return result;
+}
 
 } // namespace glTF
 
@@ -362,154 +505,5 @@ public:
 
 private:
   std::unordered_map<vertex_semantic, std::unique_ptr<std::byte[]>> _attributes;
-};
-
-class glTf_creator {
-public:
-  using node_handle = std::uint32_t;
-
-  using mesh_handle = std::uint32_t;
-
-  using animation_handle = std::uint32_t;
-
-  using scene_handle = std::uint32_t;
-
-  glTf_creator(const export_settings &settings_, Interface &max_interface_)
-      : _settings(settings_), _maxInterface(max_interface_) {
-  }
-
-  glTF::document &document() {
-    return _document;
-  }
-
-  void commit() {
-    if (_bufferSegments.length() == 0) {
-      (void)_bufferSegments.allocate_view(1, 1);
-    }
-    _glTfDocument.buffers.emplace_back();
-    auto &mainBuffer = _glTfDocument.buffers.back();
-    mainBuffer.data.resize(_bufferSegments.length());
-    _bufferSegments.read_all(
-        reinterpret_cast<std::byte *>(mainBuffer.data.data()));
-    mainBuffer.byteLength = _bufferSegments.length();
-  }
-
-  /// <summary>
-  /// Save as .glb format.
-  /// </summary>
-  /// <param name="path_"></param>
-  /// <param name="binary_dir_name_"></param>
-  /// <param name="binary_ext_"></param>
-  void save(std::u8string_view path_,
-            std::u8string_view binary_dir_name_,
-            std::u8string_view binary_ext_) {
-    for (decltype(_glTfDocument.buffers)::size_type iBuffer = 0;
-         iBuffer != _glTfDocument.buffers.size(); ++iBuffer) {
-      auto &buffer = _glTfDocument.buffers[iBuffer];
-      std::basic_stringstream<char8_t> urlss;
-      urlss << u8"./" << binary_dir_name_;
-      if (_glTfDocument.buffers.size() != 1) {
-        std::array<char, sizeof(iBuffer) * CHAR_BIT> indexChars;
-        auto result = std::to_chars(
-            indexChars.data(), indexChars.data() + indexChars.size(), iBuffer);
-        assert(result.ec == std::errc());
-        // TODO: indexString is not guarenteen as UTF8.
-        auto indexString = std::u8string_view(
-            reinterpret_cast<const char8_t *>(indexChars.data()),
-            result.ptr - indexChars.data());
-        urlss << u8"-" << indexString;
-      }
-      urlss << binary_ext_;
-      buffer.uri =
-          to_glTF_string(std::filesystem::path(urlss.str()).u8string());
-    }
-    _doSave(path_, false);
-  }
-
-  /// <summary>
-  /// Save as .gltf file.
-  /// </summary>
-  /// <param name="path_"></param>
-  void save(std::u8string_view path_) {
-    for (auto &buffer : _glTfDocument.buffers) {
-      buffer.uri.clear();
-    }
-    _doSave(path_, true);
-  }
-
-private:
-  using _buffer_type = std::vector<std::byte>;
-
-  glTF::document _document;
-  fx::gltf::Document _glTfDocument;
-  const export_settings &_settings;
-  Interface &_maxInterface;
-
-  void _doSave(std::u8string_view path_, bool binary_) try {
-    auto path = std::filesystem::path(path_).string();
-    fx::gltf::Save(_glTfDocument, path, binary_);
-  } catch (const std::exception &exception_) {
-    DebugPrint(L"glTf-exporter: exception occured when save:");
-    _printException(exception_);
-  } catch (...) {
-    DebugPrint(L"glTf-exporter: Unknown exception.");
-  }
-
-  void _printException(const std::exception &e, int level = 0) {
-    std::cerr << std::string(level, ' ') << "exception: " << e.what() << '\n';
-    try {
-      std::rethrow_if_nested(e);
-    } catch (const std::exception &e) {
-      _printException(e, level + 1);
-    } catch (...) {
-    }
-  }
-
-  std::uint32_t _addScene(fx::gltf::Scene &&scene_) {
-    auto result = _glTfDocument.scenes.size();
-    _glTfDocument.scenes.push_back(std::move(scene_));
-    return _ensureAssetCount(glTf_overflow::target_type::scene_count, result);
-  }
-
-  std::uint32_t _addNode(fx::gltf::Node &&node_) {
-    auto result = _glTfDocument.nodes.size();
-    _glTfDocument.nodes.push_back(std::move(node_));
-    return _ensureAssetCount(glTf_overflow::target_type::node_count, result);
-  }
-
-  std::uint32_t _addMesh(fx::gltf::Mesh &&mesh_) {
-    auto result = _glTfDocument.meshes.size();
-    _glTfDocument.meshes.push_back(std::move(mesh_));
-    return _ensureAssetCount(glTf_overflow::target_type::mesh_count, result);
-  }
-
-  std::uint32_t _addBufferView(fx::gltf::BufferView &&buffer_view_) {
-    auto result = _glTfDocument.bufferViews.size();
-    _glTfDocument.bufferViews.push_back(std::move(buffer_view_));
-    return _ensureAssetCount(glTf_overflow::target_type::buffer_view_count,
-                             result);
-  }
-
-  std::uint32_t _addAccessor(fx::gltf::Accessor &&accessor_) {
-    auto result = _glTfDocument.accessors.size();
-    _glTfDocument.accessors.push_back(std::move(accessor_));
-    return _ensureAssetCount(glTf_overflow::target_type::accessor_count,
-                             result);
-  }
-
-  template <typename UInt>
-  std::uint32_t _ensureAssetCount(glTf_overflow::target_type target_,
-                                  UInt count_) {
-    return _ensureNotOverflow<std::uint32_t>(target_, count_);
-  }
-
-  template <typename CapacityInt, typename UInt>
-  std::uint32_t _ensureNotOverflow(glTf_overflow::target_type target_,
-                                   UInt count_) {
-    if (count_ > std::numeric_limits<CapacityInt>::max()) {
-      throw glTf_overflow(target_);
-    }
-    return static_cast<CapacityInt>(count_);
-  }
 };
 } // namespace fant

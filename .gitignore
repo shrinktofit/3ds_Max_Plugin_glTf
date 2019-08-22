@@ -1,2 +1,8 @@
 /.vs
 /out
+
+.vscode/
+
+.xmake/
+
+build/

@@ -712,17 +712,29 @@ int glTf_exporter::DoExport(const MCHAR *name,
   glTF::document glTFDocument;
   main_visitor visitor{glTFDocument, settings};
   ei->theScene->EnumTree(&visitor);
-  // creator.commit();
+  if (glTFDocument.get_size<glTF::buffer>() == 0) {
+      auto demandBuffer = glTFDocument.make<glTF::buffer>();
+      demandBuffer->allocate(1, 0);
+  }
 
   auto extStr = path.extension().string();
   auto extStrLower = extStr;
   std::transform(extStrLower.begin(), extStrLower.end(), extStrLower.begin(),
                  ::tolower);
   auto u8Name = path.u8string();
+  auto glTFJsonStr = glTFDocument.serialize().dump(4);
   if (extStrLower == ".glb") {
-    creator.save(u8Name);
+    std::vector<glTF::chunk> chunks;
+    chunks.reserve(2);
+    chunks.emplace_back(glTF::make_json_chunk(glTFJsonStr));
+    auto glb = glTF::write_glb(chunks.begin(), chunks.end());
+    std::basic_ofstream<std::byte> ofs(path, std::ios::binary);
+    ofs.write(glb.data(), glb.size());
+    ofs.close();
   } else {
-    creator.save(u8Name, path.stem().u8string(), u8".BIN");
+    std::basic_ofstream<char8_t> ofs(path);
+    ofs << glTFJsonStr;
+    ofs.close();
   }
   return 1;
 }
