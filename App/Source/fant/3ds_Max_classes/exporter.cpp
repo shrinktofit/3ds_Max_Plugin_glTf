@@ -5,7 +5,7 @@
 #include <decomp.h>
 #include <fant/3ds_Max_classes/exporter.h>
 #include <fant/3ds_Max_classes/exporter/export_settings.h>
-#include <fant/3ds_Max_classes/exporter/glTF_creator.h>
+#include <fant/glTF.h>
 #include <fant/support/win32/get_string_resource.h>
 #include <fant/support/win32/instance.h>
 #include <fant/support/win32/mchar_to_utf8.h>
@@ -74,9 +74,11 @@ Matrix3 get_local_node_tm(INode &max_node_, TimeValue time_) {
 
 class main_visitor : public ITreeEnumProc {
 public:
-  main_visitor(glTF::document &document_, const export_settings &settings_)
-      : _document(document_), _glTFScene(document_.make<glTF::scene>()),
-        _settings(settings_) {
+  main_visitor(Interface &max_interface_,
+               glTF::document &document_,
+               const export_settings &settings_)
+      : _maxInterface(max_interface_), _document(document_),
+        _glTFScene(document_.make<glTF::scene>()), _settings(settings_) {
     _document.default_scene(_glTFScene);
   }
 
@@ -150,13 +152,14 @@ public:
   }
 
 private:
+  Interface &_maxInterface;
   glTF::document &_document;
   const export_settings &_settings;
-  std::unordered_map<INode *, glTF::asset_ptr<glTF::node>> _nodeMaps;
-  glTF::asset_ptr<glTF::scene> _glTFScene;
-  glTF::asset_ptr<glTF::buffer> _mainBuffer;
+  std::unordered_map<INode *, glTF::object_ptr<glTF::node>> _nodeMaps;
+  glTF::object_ptr<glTF::scene> _glTFScene;
+  glTF::object_ptr<glTF::buffer> _mainBuffer;
 
-  glTF::asset_ptr<glTF::node> _convertNode(INode &max_node_) {
+  glTF::object_ptr<glTF::node> _convertNode(INode &max_node_) {
     auto maxNodeName = std::basic_string_view<MCHAR>(max_node_.GetName());
     auto name = win32::mchar_to_utf8(maxNodeName);
 
@@ -197,7 +200,7 @@ private:
     return glTFNode;
   }
 
-  glTF::asset_ptr<glTF::mesh> _convertTriObj(TriObject &tri_obj_) {
+  glTF::object_ptr<glTF::mesh> _convertTriObj(TriObject &tri_obj_) {
     auto &mesh = tri_obj_.GetMesh();
     auto maxNodeName = std::basic_string_view<MCHAR>(
         tri_obj_.NodeName(), tri_obj_.NodeName().Length());
@@ -248,11 +251,12 @@ private:
                     gsl::make_span(indices.get(), vertices.size()));
   }
 
-  glTF::asset_ptr<glTF::animation> _readAnimation(INode &max_node_) {
+  glTF::object_ptr<glTF::animation> _readAnimation(INode &max_node_) {
     auto transformController = max_node_.GetTMController();
     auto positionTrack = _readPositionTrack(max_node_, *transformController);
     auto scaleTrack = _readScaleTrack(max_node_, *transformController);
     auto rotationTrack = _readRotationTrack(max_node_, *transformController);
+    return _document.make<glTF::animation>();
   }
 
   void _writePoint3(float *output_, const Point3 &p_) {
@@ -279,7 +283,7 @@ private:
     return tm;
   }
 
-  glTF::asset_ptr<glTF::mesh>
+  glTF::object_ptr<glTF::mesh>
   _addMesh(std::u8string_view name_,
            const vertex_list &vertex_list_,
            gsl::span<vertex_list::size_type> indices_) {
@@ -304,7 +308,7 @@ private:
 
     glTF::primitive primitive{glTF::primitive::mode_type::triangles};
     primitive.indices(indicesAccessor);
-    primitive.emplace_attribute(glTF::primitive::semantic_type::position,
+    primitive.emplace_attribute(glTF::standard_semantics::position,
                                 positionAccessor);
 
     auto glTFMesh = _document.make<glTF::mesh>();
@@ -314,7 +318,7 @@ private:
     return glTFMesh;
   }
 
-  glTF::asset_ptr<glTF::accessor>
+  glTF::object_ptr<glTF::accessor>
   _addIndices(gsl::span<vertex_list::size_type> indices_) {
     static_assert(export_settings::index_type_setting::unsigned_8 ==
                   static_cast<export_settings::index_type_setting>(0));
@@ -380,10 +384,11 @@ private:
     }
 
     auto bufferView = _document.make<glTF::buffer_view>(
-        _mainBuffer, sizeofIndex * indices_.size(), sizeofIndex, 0);
+        _mainBuffer, static_cast<std::uint32_t>(sizeofIndex * indices_.size()),
+        sizeofIndex);
     bufferView->target(glTF::buffer_view::target_type::element_array_buffer);
 
-    std::optional<glTF::accessor::component_type> glTfComponentType;
+    auto glTfComponentType = glTF::accessor::component_type::unsigned_byte;
     switch (*usingType) {
     case export_settings::index_type_setting::unsigned_8: {
       glTfComponentType = glTF::accessor::component_type::unsigned_byte;
@@ -407,7 +412,7 @@ private:
 
     auto accessor = _document.make<glTF::accessor>(
         bufferView, 0, glTfComponentType, glTF::accessor::type_type::scalar,
-        indices_.size());
+        static_cast<std::uint32_t>(indices_.size()));
     return accessor;
   }
 
@@ -710,11 +715,11 @@ int glTf_exporter::DoExport(const MCHAR *name,
   settings.index_type = export_settings::index_type_setting::unsigned_8;
 
   glTF::document glTFDocument;
-  main_visitor visitor{glTFDocument, settings};
+  main_visitor visitor{*i, glTFDocument, settings};
   ei->theScene->EnumTree(&visitor);
   if (glTFDocument.get_size<glTF::buffer>() == 0) {
-      auto demandBuffer = glTFDocument.make<glTF::buffer>();
-      demandBuffer->allocate(1, 0);
+    auto demandBuffer = glTFDocument.make<glTF::buffer>();
+    demandBuffer->allocate(1, 0);
   }
 
   auto extStr = path.extension().string();
@@ -722,20 +727,55 @@ int glTf_exporter::DoExport(const MCHAR *name,
   std::transform(extStrLower.begin(), extStrLower.end(), extStrLower.begin(),
                  ::tolower);
   auto u8Name = path.u8string();
-  auto glTFJsonStr = glTFDocument.serialize().dump(4);
-  if (extStrLower == ".glb") {
+  bool isGlb = extStrLower == ".glb";
+  auto glTFJsonStr = glTFDocument.serialize(isGlb).dump(4);
+  if (isGlb) {
     std::vector<glTF::chunk> chunks;
     chunks.reserve(2);
+
+    // The json chunk.
     chunks.emplace_back(glTF::make_json_chunk(glTFJsonStr));
+
+    // If the first buffer has no uri, it's treated as a chunk.
+    std::optional<std::vector<std::byte>> firstBufferData;
+    if (glTFDocument.get_size<glTF::buffer>() != 0) {
+      auto firstBuffer = glTFDocument.get<glTF::buffer>(0);
+      if (!firstBuffer->uri()) {
+        firstBufferData.emplace(firstBuffer->size());
+        firstBuffer->read_all(firstBufferData->data());
+      }
+    }
+    if (firstBufferData) {
+      chunks.emplace_back(glTF::make_buffer_chunk(
+          gsl::make_span(firstBufferData->data(), firstBufferData->size())));
+    }
+
     auto glb = glTF::write_glb(chunks.begin(), chunks.end());
     std::basic_ofstream<std::byte> ofs(path, std::ios::binary);
     ofs.write(glb.data(), glb.size());
     ofs.close();
   } else {
-    std::basic_ofstream<char8_t> ofs(path);
+    std::ofstream ofs(path);
     ofs << glTFJsonStr;
     ofs.close();
   }
+
+  // Write each buffer specified uri.
+  auto nBuffers = glTFDocument.get_size<glTF::buffer>();
+  for (decltype(nBuffers) iBuffer = 0; iBuffer < nBuffers; ++iBuffer) {
+    auto buffer = glTFDocument.get<glTF::buffer>(iBuffer);
+    if (auto uri = buffer->uri(); uri) {
+      auto uriPath = std::filesystem::path(*uri);
+      if (uriPath.is_relative()) {
+        uriPath = path.parent_path() / uriPath;
+      }
+      std::basic_ofstream<std::byte> ofs(uriPath, std::ios::binary);
+      std::vector<std::byte> data(buffer->size());
+      buffer->read_all(data.data());
+      ofs.write(data.data(), data.size());
+    }
+  }
+
   return 1;
 }
 
