@@ -80,7 +80,9 @@ add_custom_command(
 # Setup Visual Studio debugger.
 
 file (TO_NATIVE_PATH "${ASDK_3DS_MAX_HOME}/3dsmax.exe" ADSK_3DS_MAX_EXECUTABLE)
+file (TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../export_test.ms" BOOT_MAXSCRIPT)
 
 set_target_properties(${MAIN_TARGET_NAME} PROPERTIES
 	VS_DEBUGGER_COMMAND ${ADSK_3DS_MAX_EXECUTABLE}
+    VS_DEBUGGER_COMMAND_ARGUMENTS "\"-silent\" \"-U\" \"MAXScript\" \"${BOOT_MAXSCRIPT}\""
 	)
