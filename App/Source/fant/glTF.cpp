@@ -1,5 +1,5 @@
 
-#include <cppcodec/base64_url.hpp>
+#include <cppcodec/base64_rfc4648.hpp>
 #include <fant/glTF.h>
 
 namespace fant::glTF {
@@ -9,7 +9,7 @@ static std::string to_json_string(std::u8string_view string_) {
 }
 
 glTF_json object_base::serialize(const document &document_) const {
-  glTF_json result;
+  auto result = glTF_json::object();
   if (!_name.empty()) {
     result["name"] = to_json_string(_name);
   }
@@ -18,6 +18,7 @@ glTF_json object_base::serialize(const document &document_) const {
 
 glTF_json buffer::serialize(const document &document_, bool write_uri_) const {
   auto result = object_base::serialize(document_);
+  result["byteLength"] = size();
   if (write_uri_) {
     if (_uri) {
       result["uri"] = to_json_string(*_uri);
@@ -26,12 +27,82 @@ glTF_json buffer::serialize(const document &document_, bool write_uri_) const {
       read_all(data.data());
       // Unsafe
       static_assert(std::is_same_v<std::uint8_t, unsigned char>);
-      auto datauri = cppcodec::base64_url::encode(
+      auto datauri = cppcodec::base64_rfc4648::encode(
           reinterpret_cast<const std::uint8_t *>(data.data()), data.size());
       result["uri"] = "data:application/octet-stream;base64," + datauri;
     }
   }
   return result;
+}
+
+template <accessor::component_type ComponentType>
+static void eval_min_max(const accessor &accessor_, glTF_json &target_) {
+  if (accessor_.empty()) {
+    return;
+  }
+
+  unsigned nComp = 0;
+  switch (accessor_.type()) {
+  case accessor::type_type::scalar:
+    nComp = 1;
+    break;
+  case accessor::type_type::vec2:
+    nComp = 2;
+    break;
+  case accessor::type_type::vec3:
+    nComp = 3;
+    break;
+  case accessor::type_type::vec4:
+    nComp = 4;
+    break;
+  case accessor::type_type::mat2:
+    nComp = 4;
+    break;
+  case accessor::type_type::mat3:
+    nComp = 9;
+    break;
+  case accessor::type_type::mat4:
+    nComp = 16;
+    break;
+  }
+
+  using StorageType = accessor::component_storage_t<ComponentType>;
+
+  auto pdata = accessor_.buffer_view()->data();
+  auto stride = accessor_.buffer_view()->stride();
+  if (stride == 0) {
+    stride = sizeof(StorageType) * nComp;
+  }
+
+  StorageType minbuffer[16] = {};
+  StorageType maxbuffer[16] = {};
+
+  // Write first.
+  std::copy_n(reinterpret_cast<const StorageType *>(pdata), nComp, minbuffer);
+  std::copy_n(reinterpret_cast<const StorageType *>(pdata), nComp, maxbuffer);
+  pdata += stride;
+
+  for (std::remove_const_t<decltype(accessor_.count())> iAttribute = 1;
+       iAttribute < accessor_.count(); ++iAttribute, pdata += stride) {
+    auto pFirstComp = reinterpret_cast<const StorageType *>(pdata);
+    for (std::remove_const_t<decltype(nComp)> iComp = 0; iComp < nComp;
+         ++iComp) {
+      auto comp = pFirstComp[iComp];
+      auto &minc = minbuffer[iComp];
+      minc = std::min(minc, comp);
+      auto &maxc = maxbuffer[iComp];
+      maxc = std::max(maxc, comp);
+    }
+  }
+
+  auto minJson = glTF_json::array();
+  auto maxJson = glTF_json::array();
+  for (std::remove_const_t<decltype(nComp)> iComp = 0; iComp < nComp; ++iComp) {
+    minJson.push_back(minbuffer[iComp]);
+    maxJson.push_back(maxbuffer[iComp]);
+  }
+  target_["min"] = minJson;
+  target_["max"] = maxJson;
 }
 
 glTF_json accessor::serialize(const document &document_) const {
@@ -68,6 +139,32 @@ glTF_json accessor::serialize(const document &document_) const {
     }
   };
   result["type"] = serializeType();
+
+  if (_minMaxRequired) {
+    std::array<std::byte, 4 * 16> minbuffer = {};
+    std::array<std::byte, 4 * 16> maxbuffer = {};
+    switch (_componentType) {
+    case component_type::the_byte:
+      eval_min_max<component_type::the_byte>(*this, result);
+      break;
+    case component_type::unsigned_byte:
+      eval_min_max<component_type::the_byte>(*this, result);
+      break;
+    case component_type::the_short:
+      eval_min_max<component_type::the_short>(*this, result);
+      break;
+    case component_type::unsigned_short:
+      eval_min_max<component_type::unsigned_short>(*this, result);
+      break;
+    case component_type::unsigned_int:
+      eval_min_max<component_type::unsigned_int>(*this, result);
+      break;
+    case component_type::the_float:
+      eval_min_max<component_type::the_float>(*this, result);
+      break;
+    }
+  }
+
   return result;
 }
 
@@ -89,10 +186,11 @@ glTF_json buffer_view::serialize(const document &document_) const {
 
 glTF_json mesh::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
-  glTF_json primitivesJson;
+  auto primitivesJson = glTF_json::array();
   for (auto &primitive : _primitives) {
     primitivesJson.push_back(primitive.serialize(document_));
   }
+  result["primitives"] = primitivesJson;
   return result;
 }
 
@@ -135,6 +233,57 @@ glTF_json image::serialize(const document &document_) const {
   return result;
 }
 
+glTF_json node::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  if (_position) {
+    auto t = *_position;
+    if (!(t[0] == 0 && t[1] == 0 && t[2] == 0)) {
+      result["translation"] = *_position;
+    }
+  }
+  if (_rotation) {
+    auto r = *_rotation;
+    if (!(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 1)) {
+      result["rotation"] = *_rotation;
+    }
+  }
+  if (_scale) {
+    auto s = *_scale;
+    if (!(s[0] == 0 && s[1] == 0 && s[2] == 0)) {
+      result["scale"] = *_scale;
+    }
+  }
+  if (_matrix) {
+    result["matrix"] = *_matrix;
+  }
+  if (_mesh) {
+    result["mesh"] = document_.index_of(_mesh);
+  }
+  if (_material) {
+    result["material"] = document_.index_of(_material);
+  }
+  if (!_children.empty()) {
+    glTF_json childrenJson;
+    for (auto &childNode : _children) {
+      childrenJson.push_back(document_.index_of(childNode));
+    }
+    result["children"] = childrenJson;
+  }
+  return result;
+}
+
+glTF_json scene::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  if (!_nodes.empty()) {
+    glTF_json rootNodesJson;
+    for (auto &rootNode : _nodes) {
+      rootNodesJson.push_back(document_.index_of(rootNode));
+    }
+    result["nodes"] = rootNodesJson;
+  }
+  return result;
+}
+
 template <typename Object> struct object_type_t { using type = Object; };
 
 template <typename Object>
@@ -143,35 +292,45 @@ inline constexpr static object_type_t<Object> object_type = {};
 glTF_json document::serialize(bool rm_uri_of_first_buffer_) const {
   glTF_json result;
 
-  auto serializeObjectArray = [&](auto assetType) {
+  glTF_json assetJson;
+  assetJson["generator"] = "3ds-max-plugin-gltf";
+  assetJson["version"] = "2.0";
+  result["asset"] = assetJson;
+
+  result["scene"] = index_of(_defaultScene);
+
+  auto serializeObjectArray = [&](auto assetType, const char *name_) {
     using AssetType = typename std::decay_t<decltype(assetType)>::type;
-    glTF_json arrayJson;
     auto &assetArray = std::get<_object_list<AssetType>>(_assetLists);
+    if (assetArray.empty()) {
+      return;
+    }
+    glTF_json arrayJson;
     for (auto i = assetArray.begin(); i != assetArray.end(); ++i) {
       auto &asset = *i;
       if constexpr (std::is_same_v<AssetType, buffer>) {
         auto rmuri = i == assetArray.begin() && rm_uri_of_first_buffer_;
-        arrayJson.push_back(asset->serialize(*this, rmuri));
+        arrayJson.push_back(asset->serialize(*this, !rmuri));
       } else {
         arrayJson.push_back(asset->serialize(*this));
       }
     }
-    return arrayJson;
+    result[name_] = arrayJson;
   };
 
-  result["accessors"] = serializeObjectArray(object_type<accessor>);
-  result["animations"] = serializeObjectArray(object_type<animation>);
-  result["buffers"] = serializeObjectArray(object_type<buffer>);
-  result["bufferViews"] = serializeObjectArray(object_type<buffer_view>);
-  result["cameras"] = serializeObjectArray(object_type<camera>);
-  result["images"] = serializeObjectArray(object_type<image>);
-  result["materials"] = serializeObjectArray(object_type<material>);
-  result["meshes"] = serializeObjectArray(object_type<mesh>);
-  result["nodes"] = serializeObjectArray(object_type<node>);
-  result["samplers"] = serializeObjectArray(object_type<texture_sampler>);
-  result["scenes"] = serializeObjectArray(object_type<scene>);
-  result["skins"] = serializeObjectArray(object_type<skin>);
-  result["textures"] = serializeObjectArray(object_type<texture>);
+  serializeObjectArray(object_type<accessor>, "accessors");
+  serializeObjectArray(object_type<animation>, "animations");
+  serializeObjectArray(object_type<buffer>, "buffers");
+  serializeObjectArray(object_type<buffer_view>, "bufferViews");
+  serializeObjectArray(object_type<camera>, "cameras");
+  serializeObjectArray(object_type<image>, "images");
+  serializeObjectArray(object_type<material>, "materials");
+  serializeObjectArray(object_type<mesh>, "meshes");
+  serializeObjectArray(object_type<node>, "nodes");
+  serializeObjectArray(object_type<texture_sampler>, "samplers");
+  serializeObjectArray(object_type<scene>, "scenes");
+  serializeObjectArray(object_type<skin>, "skins");
+  serializeObjectArray(object_type<texture>, "textures");
 
   return result;
 }

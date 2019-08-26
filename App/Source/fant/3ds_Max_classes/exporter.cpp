@@ -80,6 +80,7 @@ public:
       : _maxInterface(max_interface_), _document(document_),
         _glTFScene(document_.make<glTF::scene>()), _settings(settings_) {
     _document.default_scene(_glTFScene);
+    _mainBuffer = document_.make<glTF::buffer>();
   }
 
   int callback(INode *max_node_) override {
@@ -147,7 +148,7 @@ public:
     }
 
     _nodeMaps.emplace(max_node_, glTFNode);
-    _readAnimation(*max_node_);
+    // _readAnimation(*max_node_);
     return TREE_CONTINUE;
   }
 
@@ -295,7 +296,7 @@ private:
 
     auto positionAccessor = _document.make<glTF::accessor>(
         mainVBView, 0, glTF::accessor::component_type::the_float,
-        glTF::accessor::type_type::vec3, vertex_list_.size());
+        glTF::accessor::type_type::vec3, vertex_list_.size(), true);
     for (vertex_list::size_type iVertex = 0; iVertex != vertex_list_.size();
          ++iVertex) {
       auto &v = vertex_list_[iVertex].vertex();
@@ -728,7 +729,7 @@ int glTf_exporter::DoExport(const MCHAR *name,
                  ::tolower);
   auto u8Name = path.u8string();
   bool isGlb = extStrLower == ".glb";
-  auto glTFJsonStr = glTFDocument.serialize(isGlb).dump(4);
+  auto glTFJsonStr = glTFDocument.serialize(isGlb).dump(2);
   if (isGlb) {
     std::vector<glTF::chunk> chunks;
     chunks.reserve(2);

@@ -166,6 +166,10 @@ public:
     _target = target_;
   }
 
+  integer stride() const {
+    return _byteStride.value_or(0);
+  }
+
   void stride(integer stride_) {
     _byteStride = stride_;
   }
@@ -191,6 +195,35 @@ public:
     the_float = integer(5126),
   };
 
+  template <component_type ComponentType> struct component_storage {};
+
+  template <> struct component_storage<component_type::the_byte> {
+    using type = std::int8_t;
+  };
+
+  template <> struct component_storage<component_type::unsigned_byte> {
+    using type = std::uint8_t;
+  };
+
+  template <> struct component_storage<component_type::the_short> {
+    using type = std::int16_t;
+  };
+
+  template <> struct component_storage<component_type::unsigned_short> {
+    using type = std::uint16_t;
+  };
+
+  template <> struct component_storage<component_type::unsigned_int> {
+    using type = std::uint32_t;
+  };
+
+  template <> struct component_storage<component_type::the_float> {
+    using type = float;
+  };
+
+  template <component_type ComponentType>
+  using component_storage_t = typename component_storage<ComponentType>::type;
+
   enum class type_type {
     scalar,
     vec2,
@@ -205,9 +238,31 @@ public:
            size_type offset_,
            component_type component_,
            type_type type_,
-           size_type count_)
+           size_type count_,
+           bool explicit_bound_required_ = false)
       : _bufferView(buffer_view_), _byteOffset(offset_),
-        _componentType(component_), _type(type_), _count(count_) {
+        _componentType(component_), _type(type_), _count(count_),
+        _minMaxRequired(explicit_bound_required_) {
+  }
+
+  object_ptr<glTF::buffer_view> buffer_view() const {
+    return _bufferView;
+  }
+
+  component_type component() const {
+    return _componentType;
+  }
+
+  type_type type() const {
+    return _type;
+  }
+
+  integer count() const {
+    return _count;
+  }
+
+  bool empty() const {
+    return _count == 0;
   }
 
   glTF_json serialize(const document &document_) const;
@@ -219,6 +274,7 @@ private:
   type_type _type;
   integer _count;
   bool _normalized = false;
+  bool _minMaxRequired;
 };
 
 class image : public object_base {
@@ -364,6 +420,8 @@ public:
     (*_rotation)[3] = w_;
   }
 
+  glTF_json serialize(const document &document_) const;
+
 private:
   std::vector<object_ptr<node>> _children;
   object_ptr<glTF::mesh> _mesh;
@@ -381,6 +439,8 @@ public:
   void add_node(object_ptr<node> node_) {
     _nodes.push_back(node_);
   }
+
+  glTF_json serialize(const document &document_) const;
 
 private:
   std::vector<object_ptr<node>> _nodes;
