@@ -233,6 +233,13 @@ glTF_json image::serialize(const document &document_) const {
   return result;
 }
 
+glTF_json animation::sampler::serialize(const document &document_) const {
+  glTF_json result;
+  result["input"] = document_.index_of(_input);
+  result["output"] = document_.index_of(_output);
+  return result;
+}
+
 glTF_json node::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
   if (_position) {

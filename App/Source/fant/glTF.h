@@ -382,7 +382,21 @@ public:
 private:
 };
 
-class animation : public object_base {};
+class animation : public object_base {
+public:
+  class sampler {
+  public:
+    sampler(object_ptr<accessor> input_, object_ptr<accessor> output_)
+        : _input(input_), _output(output_) {
+    }
+
+    glTF_json serialize(const document& document_) const;
+
+  private:
+    object_ptr<accessor> _input;
+    object_ptr<accessor> _output;
+  };
+};
 
 class node : public object_base {
 public:

@@ -38,13 +38,6 @@ std::array<glTf_extension_info, 2> glTf_extension_info_list{
     glTf_extension_info{glTf_extension::gltf, _M("GLTF")},
     glTf_extension_info{glTf_extension::glb, _M("GLB")}};
 
-enum class attribute_semantic {
-  position,
-  normal,
-  texcoord,
-  color,
-};
-
 bool undo_parents_offset(INode &node_, Point3 &point_, Quat &offset_rotation_) {
   auto parent = node_.GetParentNode();
   if (parent->IsRootNode()) {
@@ -159,6 +152,10 @@ private:
   std::unordered_map<INode *, glTF::object_ptr<glTF::node>> _nodeMaps;
   glTF::object_ptr<glTF::scene> _glTFScene;
   glTF::object_ptr<glTF::buffer> _mainBuffer;
+  glTF::object_ptr<glTF::animation> _mainAnimation;
+  std::vector<
+      std::pair<std::vector<TimeValue>, glTF::object_ptr<glTF::accessor>>>
+      _animationTimesAccessors;
 
   glTF::object_ptr<glTF::node> _convertNode(INode &max_node_) {
     auto maxNodeName = std::basic_string_view<MCHAR>(max_node_.GetName());
@@ -255,9 +252,54 @@ private:
   glTF::object_ptr<glTF::animation> _readAnimation(INode &max_node_) {
     auto transformController = max_node_.GetTMController();
     auto positionTrack = _readPositionTrack(max_node_, *transformController);
+    if (!positionTrack.times().empty()) {
+      _convertTrack(positionTrack);
+    }
     auto scaleTrack = _readScaleTrack(max_node_, *transformController);
     auto rotationTrack = _readRotationTrack(max_node_, *transformController);
     return _document.make<glTF::animation>();
+  }
+
+  glTF::object_ptr<glTF::accessor>
+  _getOrCreateKeysAccessor(gsl::span<TimeValue> times_) {
+    auto r =
+        std::find_if(_animationTimesAccessors.begin(),
+                     _animationTimesAccessors.end(), [&](auto cached_times_) {
+                       if (cached_times_.size() != times_.size()) {
+                         return false;
+                       }
+                       using Size =
+                           std::common_type_t<decltype(cached_times_.size()),
+                                              decltype(times_.size())>;
+                       for (Size i = 0; i < cached_times_.size(); ++i) {
+                         if (cached_times_[i] != times_[i]) {
+                           return false;
+                         }
+                       }
+                       return true;
+                     });
+    if (r != _animationTimesAccessors.end()) {
+      return r->second;
+    }
+
+    using GlTFTimeStorage = glTF::accessor::component_storage_t<
+        glTF::accessor::component_type::the_float>;
+
+    auto glTFTimes = std::make_unique<GlTFTimeStorage[]>(times_.size());
+    std::transform(
+        times_.begin(), times_.end(), glTFTimes.get(),
+        [](auto ticks) { return static_cast<glTF::accessor>(ticks) / 4800; });
+
+    auto bufferView = _document.make<glTF::buffer_view>(
+        _mainBuffer, times_.size() * sizeof(GlTFTimeStorage), 0);
+    auto accessor = _document.make<glTF::accessor>(
+        bufferView, 0, glTF::accessor::component_type::the_float,
+        glTF::accessor::type_type::scalar, times_.size());
+
+    std::vector<TimeValue> cachedTimes(times_.size());
+    std::copy(times_.begin(), times_.end(), cachedTimes.begin());
+    _animationTimesAccessors.emplace_back(std::move(cachedTimes), accessor);
+    return accessor;
   }
 
   void _writePoint3(float *output_, const Point3 &p_) {
@@ -436,38 +478,48 @@ private:
   template <_track_kind TrackKind>
   using _track_value_t = typename _track_value<TrackKind>::type;
 
-  template <_track_kind TrackKind> class _xx_track {
+  class _xx_track_base {
+  public:
+    _xx_track_base(std::uint32_t size_) : _times(_times) {
+    }
+
+    gsl::span<TimeValue> times() {
+      return gsl::make_span(_times.data(), _times.size());
+    }
+
+  private:
+    std::vector<TimeValue> _times;
+  };
+
+  template <_track_kind TrackKind> class _xx_track : public _xx_track_base {
     using value_type = _track_value_t<TrackKind>;
 
   public:
-    _xx_track(std::uint32_t size_) : _times(size_), _values(size_) {
+    _xx_track(std::uint32_t size_) : _xx_track_base(size_), _values(size_) {
     }
 
-    void set(std::uint32_t index_, TimeValue time_, const value_type &value_) {
-      _times[index_] = time_;
-      _values[index_] = value_;
-    }
-
-    TimeValue &timeAt(std::uint32_t index_) {
-      return _times[index_];
-    }
-
-    value_type &valueAt(std::uint32_t index_) {
-      return _values[index_];
+    gsl::span<value_type> &values() {
+      return gsl::make_span(_values.data(), _values.size());
     }
 
     _xx_track subtrack_pre(std::uint32_t size_) {
       assert(size_ <= _values.size());
       _xx_track result(size_);
-      std::copy_n(_times.begin(), size_, result._times.begin());
+      std::copy_n(times().begin(), size_, result.times().begin());
       std::copy_n(_values.begin(), size_, result._values.begin());
       return result;
     }
 
   private:
-    std::vector<TimeValue> _times;
     std::vector<value_type> _values;
   };
+
+  template <_track_kind TrackKind>
+  glTF::animation::sampler _convertTrack(const _xx_track<TrackKind> track_) {
+    auto input = _getOrCreateKeysAccessor(track_.times());
+    glTF::animation::sampler sampler(input);
+    return sampler;
+  }
 
   _xx_track<_track_kind::translation>
   _readPositionTrack(INode &max_node_, Control &transform_control_) {
@@ -535,7 +587,8 @@ private:
                       "Non-exhaused.");
       }
       _postprocessTrackValue<TrackKind>(max_node_, trackValue);
-      track.set(iKey, time / GetTicksPerFrame(), trackValue);
+      track.times()[iKey] = time / GetTicksPerFrame();
+      track.values()[iKey] = trackValue;
     }
     return track;
   }
@@ -575,8 +628,10 @@ private:
       }
 
       if (iEssentialKey == 0 ||
-          !_approxEqual(trackValue, track.valueAt(nKey - 1))) {
-        track.set(nKey++, time, trackValue);
+          !_approxEqual(trackValue, track.values()[nKey - 1])) {
+        track.times()[nKey] = time;
+        track.values()[nKey] = trackValue;
+        ++nKey;
       }
     }
     auto reducedTrack = track.subtrack_pre(nKey);
@@ -616,6 +671,10 @@ private:
     } else {
       static_assert(dependent_false<decltype(ClassId)>::value, "Non-exhaused.");
     }
+  }
+
+  glTF::object_ptr<glTF::animation> _getOrCreateGlTFAnimation() {
+    return nullptr;
   }
 
   static bool _approxEqual(float lhs_, float rhs_) {
