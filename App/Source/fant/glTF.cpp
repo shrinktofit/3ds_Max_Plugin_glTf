@@ -108,7 +108,7 @@ static void eval_min_max(const accessor &accessor_, glTF_json &target_) {
 glTF_json accessor::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
   if (_bufferView) {
-    result["bufferView"] = document_.index_of(_bufferView);
+    result["bufferView"] = document_.factory().index_of(_bufferView);
   }
   if (_byteOffset) {
     result["byteOffset"] = _byteOffset;
@@ -170,7 +170,7 @@ glTF_json accessor::serialize(const document &document_) const {
 
 glTF_json buffer_view::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
-  result["buffer"] = document_.index_of(_allocateResult.buffer);
+  result["buffer"] = document_.factory().index_of(_allocateResult.buffer);
   if (_allocateResult.offset != 0) {
     result["byteOffset"] = _allocateResult.offset;
   }
@@ -199,14 +199,14 @@ glTF_json primitive::serialize(const document &document_) const {
   glTF_json attributesJson;
   for (auto &attribute : _attributes) {
     attributesJson[to_json_string(attribute.first)] =
-        document_.index_of(attribute.second);
+        document_.factory().index_of(attribute.second);
   }
   result["attributes"] = attributesJson;
   if (_indices) {
-    result["indices"] = document_.index_of(_indices);
+    result["indices"] = document_.factory().index_of(_indices);
   }
   if (_material) {
-    result["material"] = document_.index_of(_material);
+    result["material"] = document_.factory().index_of(_material);
   }
   if (_mode != mode_type::triangles) {
     result["mode"] = static_cast<integer>(_mode);
@@ -223,7 +223,7 @@ glTF_json image::serialize(const document &document_) const {
           result["uri"] = to_json_string(real_source_);
         } else if constexpr (std::is_same_v<RealSource,
                                             object_ptr<buffer_view>>) {
-          result["bufferView"] = document_.index_of(real_source_);
+          result["bufferView"] = document_.factory().index_of(real_source_);
         }
       },
       _source);
@@ -235,8 +235,8 @@ glTF_json image::serialize(const document &document_) const {
 
 glTF_json animation::sampler::serialize(const document &document_) const {
   glTF_json result;
-  result["input"] = document_.index_of(_input);
-  result["output"] = document_.index_of(_output);
+  result["input"] = document_.factory().index_of(_input);
+  result["output"] = document_.factory().index_of(_output);
   return result;
 }
 
@@ -264,15 +264,15 @@ glTF_json node::serialize(const document &document_) const {
     result["matrix"] = *_matrix;
   }
   if (_mesh) {
-    result["mesh"] = document_.index_of(_mesh);
+    result["mesh"] = document_.factory().index_of(_mesh);
   }
   if (_material) {
-    result["material"] = document_.index_of(_material);
+    result["material"] = document_.factory().index_of(_material);
   }
   if (!_children.empty()) {
     glTF_json childrenJson;
     for (auto &childNode : _children) {
-      childrenJson.push_back(document_.index_of(childNode));
+      childrenJson.push_back(document_.factory().index_of(childNode));
     }
     result["children"] = childrenJson;
   }
@@ -284,7 +284,7 @@ glTF_json scene::serialize(const document &document_) const {
   if (!_nodes.empty()) {
     glTF_json rootNodesJson;
     for (auto &rootNode : _nodes) {
-      rootNodesJson.push_back(document_.index_of(rootNode));
+      rootNodesJson.push_back(document_.factory().index_of(rootNode));
     }
     result["nodes"] = rootNodesJson;
   }
@@ -304,11 +304,11 @@ glTF_json document::serialize(bool rm_uri_of_first_buffer_) const {
   assetJson["version"] = "2.0";
   result["asset"] = assetJson;
 
-  result["scene"] = index_of(_defaultScene);
+  result["scene"] = factory().index_of(_defaultScene);
 
   auto serializeObjectArray = [&](auto assetType, const char *name_) {
     using AssetType = typename std::decay_t<decltype(assetType)>::type;
-    auto &assetArray = std::get<_object_list<AssetType>>(_assetLists);
+    auto &assetArray = factory().get<AssetType>();
     if (assetArray.empty()) {
       return;
     }

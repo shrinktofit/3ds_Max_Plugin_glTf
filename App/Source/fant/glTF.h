@@ -61,6 +61,22 @@ using integer = std::uint32_t;
 
 class document;
 
+class animation;
+class buffer;
+class image;
+class camera;
+class texture;
+class buffer_view;
+class accessor;
+class texture_sampler;
+class mesh;
+class material;
+class skin;
+class node;
+class scene;
+
+template <typename Object> using object_ptr = std::shared_ptr<Object>;
+
 class object_base {
 public:
   void name(const std::u8string_view name_) {
@@ -74,7 +90,46 @@ private:
   std::unordered_map<std::u8string, glTF_json> _extensions;
 };
 
-template <typename Asset> using object_ptr = std::shared_ptr<Asset>;
+template <typename... Objects> class object_factory {
+public:
+  template <typename Object, typename... Args>
+  object_ptr<Object> make(Args &&... args) {
+    auto ptr = std::make_shared<Object>(std::forward<Args>(args)...);
+    std::get<_object_list<Object>>(_assetLists).push_back(ptr);
+    return ptr;
+  }
+
+  template <typename Object> decltype(auto) get() {
+    return std::get<_object_list<Object>>(_assetLists);
+  }
+
+  template <typename Object> decltype(auto) get() const {
+    return std::get<_object_list<Object>>(_assetLists);
+  }
+
+  template <typename Object> object_ptr<Object> get(std::uint32_t index_) {
+    return get<Object>()[index_];
+  }
+
+  template <typename Object> std::uint32_t get_size() {
+    return static_cast<std::uint32_t>(get<Object>().size());
+  }
+
+  template <typename Object> integer index_of(object_ptr<Object> asset) const {
+    const auto &assets = get<Object>();
+    if (auto r = std::find(assets.begin(), assets.end(), asset);
+        r != assets.end()) {
+      return static_cast<integer>(std::distance(assets.begin(), r));
+    }
+    throw std::out_of_range("glTF object count out of range.");
+  }
+
+private:
+  template <typename Asset> using _object_list = std::vector<object_ptr<Asset>>;
+
+  std::tuple<_object_list<Objects>...> _assetLists;
+};
+
 class buffer : public object_base {
 public:
   using size_type = std::uint32_t;
@@ -195,6 +250,21 @@ public:
     the_float = integer(5126),
   };
 
+  static size_type required_bytes(component_type component_) {
+    switch (component_) {
+    case component_type::the_byte:
+    case component_type::unsigned_byte:
+      return 1;
+    case component_type::the_short:
+    case component_type::unsigned_short:
+      return 2;
+    case component_type::unsigned_int:
+    case component_type::the_float:
+      return 4;
+    }
+    throw std::invalid_argument("");
+  }
+
   template <component_type ComponentType> struct component_storage {};
 
   template <> struct component_storage<component_type::the_byte> {
@@ -234,6 +304,26 @@ public:
     mat4,
   };
 
+  static size_type required_components(type_type type_) {
+    switch (type_) {
+    case type_type::scalar:
+      return 1;
+    case type_type::vec2:
+      return 2;
+    case type_type::vec3:
+      return 3;
+    case type_type::vec4:
+      return 4;
+    case type_type::mat2:
+      return 2;
+    case type_type::mat3:
+      return 3;
+    case type_type::mat4:
+      return 4;
+    }
+    throw std::invalid_argument("");
+  }
+
   accessor(object_ptr<glTF::buffer_view> buffer_view_,
            size_type offset_,
            component_type component_,
@@ -263,6 +353,16 @@ public:
 
   bool empty() const {
     return _count == 0;
+  }
+
+  template <component_type Component>
+  auto typed_data() {
+    return reinterpret_cast<component_storage_t<Component>*>(_bufferView->data() + _byteOffset);
+  }
+
+  template <component_type Component>
+  auto typed_data() const {
+    return reinterpret_cast<const component_storage_t<Component>*>(_bufferView->data() + _byteOffset);
   }
 
   glTF_json serialize(const document &document_) const;
@@ -390,12 +490,56 @@ public:
         : _input(input_), _output(output_) {
     }
 
-    glTF_json serialize(const document& document_) const;
+    glTF_json serialize(const document &document_) const;
 
   private:
     object_ptr<accessor> _input;
     object_ptr<accessor> _output;
   };
+
+  class channel {
+  public:
+    class target_type {
+    public:
+      target_type(std::u8string_view path_): _path(path_) {
+      }
+
+      target_type(std::u8string_view path_, object_ptr<glTF::node> node_) : _path(path_), _node(node_) {
+      }
+
+      void node(object_ptr<glTF::node> node_) {
+        _node = node_;
+      }
+    private:
+      std::u8string _path;
+      object_ptr<glTF::node> _node;
+    };
+
+    channel(object_ptr<sampler> sampler_, target_type target_)
+        : _sampler(sampler_), _target(target_) {
+    }
+
+    target_type target() {
+      return _target;
+    }
+
+  private:
+    object_ptr<sampler> _sampler;
+    target_type _target;
+  };
+
+  using factory_type = object_factory<sampler, channel>;
+
+  const factory_type &factory() const {
+    return _factory;
+  }
+
+  factory_type &factory() {
+    return _factory;
+  }
+
+private:
+  factory_type _factory;
 };
 
 class node : public object_base {
@@ -462,56 +606,37 @@ private:
 
 class document {
 public:
-  template <typename Asset, typename... Args>
-  object_ptr<Asset> make(Args &&... args) {
-    auto ptr = std::make_shared<Asset>(std::forward<Args>(args)...);
-    std::get<_object_list<Asset>>(_assetLists).push_back(ptr);
-    return ptr;
-  }
-
-  template <typename Asset> object_ptr<Asset> get(std::uint32_t index_) {
-    return std::get<_object_list<Asset>>(_assetLists)[index_];
-  }
-
-  template <typename Asset> std::uint32_t get_size() {
-    return static_cast<std::uint32_t>(
-        std::get<_object_list<Asset>>(_assetLists).size());
-  }
+  using factory_type = object_factory<animation,
+                                      buffer,
+                                      image,
+                                      camera,
+                                      texture,
+                                      buffer_view,
+                                      accessor,
+                                      texture_sampler,
+                                      mesh,
+                                      material,
+                                      skin,
+                                      node,
+                                      scene>;
 
   void default_scene(object_ptr<scene> scene_) {
     _defaultScene = scene_;
   }
 
-  template <typename Asset> integer index_of(object_ptr<Asset> asset) const {
-    const auto &assets = std::get<_object_list<Asset>>(_assetLists);
-    if (auto r = std::find(assets.begin(), assets.end(), asset);
-        r != assets.end()) {
-      return static_cast<integer>(std::distance(assets.begin(), r));
-    }
-    throw std::out_of_range("glTF object count out of range.");
-  }
-
   glTF_json serialize(bool rm_uri_of_first_buffer_) const;
 
+  const factory_type &factory() const {
+    return _factory;
+  }
+
+  factory_type &factory() {
+    return _factory;
+  }
+
 private:
+  factory_type _factory;
   object_ptr<scene> _defaultScene;
-
-  template <typename Asset> using _object_list = std::vector<object_ptr<Asset>>;
-
-  std::tuple<_object_list<animation>,
-             _object_list<buffer>,
-             _object_list<image>,
-             _object_list<camera>,
-             _object_list<texture>,
-             _object_list<buffer_view>,
-             _object_list<accessor>,
-             _object_list<texture_sampler>,
-             _object_list<mesh>,
-             _object_list<material>,
-             _object_list<skin>,
-             _object_list<node>,
-             _object_list<scene>>
-      _assetLists;
 };
 
 using chunk_type_t = std::uint32_t;
