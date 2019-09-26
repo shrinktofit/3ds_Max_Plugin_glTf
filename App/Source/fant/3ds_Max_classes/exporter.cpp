@@ -104,12 +104,7 @@ int glTf_exporter::DoExport(const MCHAR *name,
   settings.index_type = export_settings::index_type_setting::unsigned_8;
 
   glTF::document glTFDocument;
-  exporter_visitor visitor{*i, glTFDocument, settings};
-  ei->theScene->EnumTree(&visitor);
-  if (glTFDocument.factory().get_size<glTF::buffer>() == 0) {
-    auto demandBuffer = glTFDocument.factory().make<glTF::buffer>();
-    demandBuffer->allocate(1, 0);
-  }
+  exporter_visitor visitor{*i, glTFDocument, settings, *ei->theScene};
 
   auto extStr = path.extension().string();
   auto extStrLower = extStr;

@@ -46,7 +46,9 @@ void exporter_visitor::_bakeAnimation(INode &max_node_,
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(
         sampler,
-        glTF::animation::channel::target_type{u8"translation", glTF_node_});
+        glTF::animation::channel::target_type{
+            glTF::animation::channel::target_type::builtin_path::translation,
+            glTF_node_});
   }
 
   if (!std::all_of(rotations.begin() + 1, rotations.end(),
@@ -58,7 +60,9 @@ void exporter_visitor::_bakeAnimation(INode &max_node_,
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(
         sampler,
-        glTF::animation::channel::target_type{u8"rotation", glTF_node_});
+        glTF::animation::channel::target_type{
+            glTF::animation::channel::target_type::builtin_path::rotation,
+            glTF_node_});
   }
 
   if (!std::all_of(scales.begin() + 1, scales.end(), [&](const auto &scale_) {
@@ -68,7 +72,9 @@ void exporter_visitor::_bakeAnimation(INode &max_node_,
     auto sampler = _mainAnimation->factory().make<glTF::animation::sampler>(
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(
-        sampler, glTF::animation::channel::target_type{u8"scale", glTF_node_});
+        sampler, glTF::animation::channel::target_type{
+                     glTF::animation::channel::target_type::builtin_path::scale,
+                     glTF_node_});
   }
 }
 } // namespace fant

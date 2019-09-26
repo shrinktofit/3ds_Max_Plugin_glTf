@@ -229,6 +229,10 @@ public:
     _byteStride = stride_;
   }
 
+  integer offset() const {
+    return _allocateResult.offset;
+  }
+
   glTF_json serialize(const document &document_) const;
 
 private:
@@ -315,11 +319,11 @@ public:
     case type_type::vec4:
       return 4;
     case type_type::mat2:
-      return 2;
-    case type_type::mat3:
-      return 3;
-    case type_type::mat4:
       return 4;
+    case type_type::mat3:
+      return 9;
+    case type_type::mat4:
+      return 16;
     }
     throw std::invalid_argument("");
   }
@@ -333,6 +337,14 @@ public:
       : _bufferView(buffer_view_), _byteOffset(offset_),
         _componentType(component_), _type(type_), _count(count_),
         _minMaxRequired(explicit_bound_required_) {
+    assert((_byteOffset % required_bytes(_componentType) == 0) &&
+           "The offset of an accessor into a bufferView must be a multiple of "
+           "the size of the accessor's component type.");
+    assert(((_byteOffset + buffer_view_->offset()) %
+                required_bytes(_componentType) ==
+            0) &&
+           "The offset of an accessor into a buffer must be a multiple of the "
+           "size of the accessor's component type.");
   }
 
   object_ptr<glTF::buffer_view> buffer_view() const {
@@ -355,14 +367,26 @@ public:
     return _count == 0;
   }
 
-  template <component_type Component>
-  auto typed_data() {
-    return reinterpret_cast<component_storage_t<Component>*>(_bufferView->data() + _byteOffset);
+  auto data() const {
+    return _bufferView->data() + _byteOffset;
   }
 
-  template <component_type Component>
-  auto typed_data() const {
-    return reinterpret_cast<const component_storage_t<Component>*>(_bufferView->data() + _byteOffset);
+  auto data() {
+    return _bufferView->data() + _byteOffset;
+  }
+
+  template <component_type Component> auto typed_data() {
+    return reinterpret_cast<component_storage_t<Component> *>(
+        _bufferView->data() + _byteOffset);
+  }
+
+  template <component_type Component> auto typed_data() const {
+    return reinterpret_cast<const component_storage_t<Component> *>(
+        _bufferView->data() + _byteOffset);
+  }
+
+  void explicit_bound_required(bool required_) {
+    _minMaxRequired = required_;
   }
 
   glTF_json serialize(const document &document_) const;
@@ -429,7 +453,7 @@ inline std::u8string joints(unsigned set_) {
 }
 
 inline std::u8string weights(unsigned set_) {
-  return u8"WEIGHTS" + to_u8string(set_);
+  return u8"WEIGHTS_" + to_u8string(set_);
 }
 } // namespace standard_semantics
 
@@ -479,7 +503,19 @@ private:
 
 class skin : public object_base {
 public:
+  void add_joint(object_ptr<node> node_) {
+    _joints.emplace_back(node_);
+  }
+
+  void inverse_bind_matrices(object_ptr<accessor> ibm_) {
+    _inverseBindMatrices = ibm_;
+  }
+
+  glTF_json serialize(const document &document_) const;
+
 private:
+  std::vector<object_ptr<node>> _joints;
+  object_ptr<accessor> _inverseBindMatrices;
 };
 
 class animation : public object_base {
@@ -501,17 +537,28 @@ public:
   public:
     class target_type {
     public:
-      target_type(std::u8string_view path_): _path(path_) {
+      enum class builtin_path {
+        translation,
+        rotation,
+        scale,
+        weights,
+      };
+
+      target_type(builtin_path path_) : _path(path_) {
       }
 
-      target_type(std::u8string_view path_, object_ptr<glTF::node> node_) : _path(path_), _node(node_) {
+      target_type(builtin_path path_, object_ptr<glTF::node> node_)
+          : _path(path_), _node(node_) {
       }
 
       void node(object_ptr<glTF::node> node_) {
         _node = node_;
       }
+
+      glTF_json serialize(const document &document_) const;
+
     private:
-      std::u8string _path;
+      builtin_path _path;
       object_ptr<glTF::node> _node;
     };
 
@@ -522,6 +569,9 @@ public:
     target_type target() {
       return _target;
     }
+
+    glTF_json serialize(const document &document_,
+                        const animation &animation_) const;
 
   private:
     object_ptr<sampler> _sampler;
@@ -538,6 +588,8 @@ public:
     return _factory;
   }
 
+  glTF_json serialize(const document &document_) const;
+
 private:
   factory_type _factory;
 };
@@ -546,6 +598,10 @@ class node : public object_base {
 public:
   void mesh(object_ptr<glTF::mesh> mesh_) {
     _mesh = mesh_;
+  }
+
+  void skin(object_ptr<glTF::skin> skin_) {
+    _skin = skin_;
   }
 
   void material(object_ptr<glTF::material> material_) {
@@ -583,6 +639,7 @@ public:
 private:
   std::vector<object_ptr<node>> _children;
   object_ptr<glTF::mesh> _mesh;
+  object_ptr<glTF::skin> _skin;
   object_ptr<glTF::material> _material;
   std::optional<std::array<number, 3>> _position;
   std::optional<std::array<number, 3>> _scale;

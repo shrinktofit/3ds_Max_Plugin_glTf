@@ -214,6 +214,22 @@ glTF_json primitive::serialize(const document &document_) const {
   return result;
 }
 
+glTF_json skin::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  if (!_joints.empty()) {
+    glTF_json jointsJson;
+    for (auto &joint : _joints) {
+      jointsJson.push_back(document_.factory().index_of(joint));
+    }
+    result["joints"] = jointsJson;
+  }
+  if (_inverseBindMatrices) {
+    result["inverseBindMatrices"] =
+        document_.factory().index_of(_inverseBindMatrices);
+  }
+  return result;
+}
+
 glTF_json image::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
   std::visit(
@@ -230,6 +246,53 @@ glTF_json image::serialize(const document &document_) const {
   if (_mimeType) {
     result["mimeType"] = to_json_string(*_mimeType);
   }
+  return result;
+}
+
+glTF_json animation::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  auto channelsJson = glTF_json::array();
+  for (auto &channelv : factory().get<channel>()) {
+    channelsJson.push_back(channelv->serialize(document_, *this));
+  }
+  result["channels"] = channelsJson;
+  auto samplersJson = glTF_json::array();
+  for (auto &samplerv : factory().get<sampler>()) {
+    samplersJson.push_back(samplerv->serialize(document_));
+  }
+  result["samplers"] = samplersJson;
+  return result;
+}
+
+glTF_json animation::channel::serialize(const document &document_,
+                                        const animation &animation_) const {
+  glTF_json result;
+  result["sampler"] = animation_.factory().index_of(_sampler);
+  result["target"] = _target.serialize(document_);
+  return result;
+}
+
+glTF_json
+animation::channel::target_type::serialize(const document &document_) const {
+  glTF_json result;
+  if (_node) {
+    result["node"] = document_.factory().index_of(_node);
+  }
+  auto serializePath = [this]() {
+    switch (_path) {
+    case builtin_path::translation:
+      return "translation";
+    case builtin_path::rotation:
+      return "rotation";
+    case builtin_path::scale:
+      return "scale";
+    case builtin_path::weights:
+      return "weights";
+    default:
+      return "";
+    }
+  };
+  result["path"] = serializePath();
   return result;
 }
 
@@ -265,6 +328,9 @@ glTF_json node::serialize(const document &document_) const {
   }
   if (_mesh) {
     result["mesh"] = document_.factory().index_of(_mesh);
+  }
+  if (_skin) {
+    result["skin"] = document_.factory().index_of(_skin);
   }
   if (_material) {
     result["material"] = document_.factory().index_of(_material);
