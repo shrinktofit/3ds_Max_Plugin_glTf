@@ -30,7 +30,7 @@ exporter_visitor::_tryExportSkin(INode &max_node_, _immediate_mesh &imm_mesh_) {
       continue;
     }
 
-    glTFSkin = _convertSkin(*skin);
+    glTFSkin = _convertSkin(max_node_, *skin);
 
     const auto nPoints = skinContextData->GetNumPoints();
     if (nPoints != imm_mesh_.vertices.vertex_count()) {
@@ -42,11 +42,14 @@ exporter_visitor::_tryExportSkin(INode &max_node_, _immediate_mesh &imm_mesh_) {
     bool exceedMaxAllowedJoints = false;
     std::vector<std::pair<std::byte *, std::byte *>> sets;
     auto addset = [&]() {
+      auto iset = sets.size();
       auto jointsChannelData = imm_mesh_.vertices.add_channel(
-          glTF::standard_semantics::joints(0), glTF::accessor::type_type::vec4,
+          glTF::standard_semantics::joints(iset),
+          glTF::accessor::type_type::vec4,
           glTF::accessor::component_type::unsigned_short);
       auto weightsChannelData = imm_mesh_.vertices.add_channel(
-          glTF::standard_semantics::weights(0), glTF::accessor::type_type::vec4,
+          glTF::standard_semantics::weights(iset),
+          glTF::accessor::type_type::vec4,
           glTF::accessor::component_type::the_float);
       sets.push_back({jointsChannelData, weightsChannelData});
     };
@@ -85,7 +88,7 @@ exporter_visitor::_tryExportSkin(INode &max_node_, _immediate_mesh &imm_mesh_) {
             glTF::accessor::component_type::unsigned_short>;
 
         using WeightStorage = glTF::accessor::component_storage_t<
-            glTF::accessor::component_type::unsigned_short>;
+            glTF::accessor::component_type::the_float>;
 
         reinterpret_cast<JointStorage *>(
             sets[iset].first)[4 * iPoint + iinflu] = assignedBoneId;
@@ -103,8 +106,11 @@ exporter_visitor::_tryExportSkin(INode &max_node_, _immediate_mesh &imm_mesh_) {
   return glTFSkin;
 }
 
-glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(ISkin &max_skin_) {
+glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(INode &max_node_,
+                                                            ISkin &max_skin_) {
   auto glTFSkin = _document.factory().make<glTF::skin>();
+
+  auto skinHostNodeWorldTM = max_node_.GetObjectTM(0);
 
   const auto nBones = max_skin_.GetNumBones();
   std::vector<Matrix3> inverseBindMatrices(nBones);
@@ -117,7 +123,8 @@ glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(ISkin &max_skin_) {
       throw std::runtime_error("Bone node is not in the scene graph.");
     }
     auto glTFBoneNode = rglTFBoneNode->second;
-    auto inverseBindMatrix = Inverse(boneNode->GetNodeTM(0));
+    auto inverseBindMatrix =
+        skinHostNodeWorldTM * Inverse(boneNode->GetNodeTM(0));
     inverseBindMatrices[iBone] = inverseBindMatrix;
     glTFSkin->add_joint(glTFBoneNode);
   }
@@ -130,7 +137,7 @@ glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(ISkin &max_skin_) {
           ->typed_data<glTF::accessor::component_type::the_float>();
   for (decltype(inverseBindMatrices.size()) i = 0;
        i < inverseBindMatrices.size(); ++i) {
-    _convertMaxMatrix3ToMat4(inverseBindMatrices[i],
+    _convertMaxMatrix3ToGlTFMat4(inverseBindMatrices[i],
                              inverseBindMatricesData + 16 * i);
   }
   glTFSkin->inverse_bind_matrices(inverseBindMatricesAccessor);

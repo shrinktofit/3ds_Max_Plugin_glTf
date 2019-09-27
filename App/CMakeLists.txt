@@ -49,6 +49,7 @@ endif ()
 target_link_libraries(
 	${MAIN_TARGET_NAME}
 	${3DSMAX_SDK_LIB_DIR}/core.lib
+    ${3DSMAX_SDK_LIB_DIR}/bmm.lib
 	${3DSMAX_SDK_LIB_DIR}/geom.lib
 	${3DSMAX_SDK_LIB_DIR}/gfx.lib
 	${3DSMAX_SDK_LIB_DIR}/mesh.lib

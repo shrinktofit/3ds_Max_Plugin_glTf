@@ -77,8 +77,30 @@ class scene;
 
 template <typename Object> using object_ptr = std::shared_ptr<Object>;
 
-class object_base {
+class extendable {
 public:
+  void add_extension(std::u8string_view key_, const glTF_json &value_) {
+    _extensions.emplace(key_, value_);
+  }
+
+  void extras(const glTF_json &extras_) {
+    _extras = extras_;
+  }
+
+protected:
+  void serialize_extras_extensions(glTF_json &out_) const;
+
+private:
+  std::unordered_map<std::u8string, glTF_json> _extensions;
+  std::optional<glTF_json> _extras;
+};
+
+class object_base : public extendable {
+public:
+  const std::u8string_view name() const {
+    return _name;
+  }
+
   void name(const std::u8string_view name_) {
     _name = name_;
   }
@@ -431,7 +453,111 @@ public:
 private:
 };
 
-class material : public object_base {};
+class texture_info : public extendable {
+public:
+  texture_info(object_ptr<glTF::texture> texture_) : _texture(texture_) {
+  }
+
+  glTF_json serialize(const document &document_) const;
+
+private:
+  constexpr inline static auto _defaultTexCoord = 0;
+
+  object_ptr<glTF::texture> _texture;
+  integer _texCoord = _defaultTexCoord;
+};
+
+class material : public object_base {
+public:
+  enum class alpha_mode_type {
+    opaque,
+    mask,
+    blend,
+  };
+
+  class normal_textre_info : public texture_info {
+  public:
+    glTF_json serialize(const document &document_) const;
+
+  private:
+    constexpr inline static auto _defaultScale = 1;
+    number _scale = _defaultScale;
+  };
+
+  class occlusion_textre_info : public texture_info {
+  public:
+    glTF_json serialize(const document &document_) const;
+
+  private:
+    constexpr inline static auto _defaultStrength = 1;
+    number _stength = _defaultStrength;
+  };
+
+  class pbr_metallic_roughness_info : public extendable {
+  public:
+    void base_color_factor(number r_, number g_, number b_, number a_ = 1) {
+      _baseColorFactor = {r_, g_, b_, a_};
+    }
+
+    void base_color_texture(texture_info info_) {
+      _baseColorTexture = info_;
+    }
+
+    glTF_json serialize(const document &document_) const;
+
+  private:
+    constexpr inline static std::array<number, 4> _defaultBaseColorFactor = {
+        1, 1, 1, 1};
+    constexpr inline static auto _defaultMetallicFactor = 1;
+    constexpr inline static auto _defaultRoughnessFactor = 1;
+
+    std::array<number, 4> _baseColorFactor = _defaultBaseColorFactor;
+    std::optional<texture_info> _baseColorTexture;
+    number _metallicFactor = _defaultMetallicFactor;
+    number _roughnessFactor = _defaultRoughnessFactor;
+    std::optional<texture_info> _metallicRoughnessTexture;
+  };
+
+  void pbr_metallic_roughness(pbr_metallic_roughness_info value_) {
+    _pbrMetallicRoughness = value_;
+  }
+
+  void emissive_factor(number f1_, number f2_, number f3_) {
+    _emissiveFactor[0] = f1_;
+    _emissiveFactor[1] = f2_;
+    _emissiveFactor[2] = f3_;
+  }
+
+  void alpha_mode(alpha_mode_type value_) {
+    _alphaMode = value_;
+  }
+
+  void alpha_cutoff(number value_) {
+    _alphaCutoff = value_;
+  }
+
+  void double_sided(bool value_) {
+    _doubleSided = value_;
+  }
+
+  glTF_json serialize(const document &document_) const;
+
+private:
+  constexpr inline static std::array<number, 3> _defaultEmissiveFactor = {0, 0,
+                                                                          0};
+  constexpr inline static auto _defaultAlphaMode = alpha_mode_type::opaque;
+  constexpr inline static auto _defaultAlphaCutoff = 0.5;
+  constexpr inline static auto _defaultDoubleSided = false;
+
+  std::optional<pbr_metallic_roughness_info> _pbrMetallicRoughness;
+  std::optional<normal_textre_info> _normalTexture;
+  std::optional<occlusion_textre_info> _occlusionTexture;
+  std::optional<texture_info> _emissiveTexture;
+  std::array<number, 3> _emissiveFactor = {0, 0, 0};
+  alpha_mode_type _alphaMode = _defaultAlphaMode;
+  number _alphaCutoff = _defaultAlphaCutoff;
+  bool _doubleSided = _defaultDoubleSided;
+};
 
 namespace standard_semantics {
 inline constexpr auto position = u8"POSITION";
@@ -457,7 +583,7 @@ inline std::u8string weights(unsigned set_) {
 }
 } // namespace standard_semantics
 
-class primitive {
+class primitive : public extendable {
 public:
   enum class mode_type {
     points = integer(0),
@@ -480,13 +606,17 @@ public:
     _indices = indices_;
   }
 
+  void material(object_ptr<glTF::material> material_) {
+    _material = material_;
+  }
+
   glTF_json serialize(const document &document_) const;
 
 private:
   mode_type _mode;
   std::unordered_map<std::u8string, object_ptr<accessor>> _attributes;
   object_ptr<accessor> _indices;
-  object_ptr<material> _material;
+  object_ptr<glTF::material> _material;
 };
 
 class mesh : public object_base {
@@ -520,7 +650,7 @@ private:
 
 class animation : public object_base {
 public:
-  class sampler {
+  class sampler : public extendable {
   public:
     sampler(object_ptr<accessor> input_, object_ptr<accessor> output_)
         : _input(input_), _output(output_) {
@@ -533,9 +663,9 @@ public:
     object_ptr<accessor> _output;
   };
 
-  class channel {
+  class channel : public extendable {
   public:
-    class target_type {
+    class target_type : public extendable {
     public:
       enum class builtin_path {
         translation,
@@ -604,10 +734,6 @@ public:
     _skin = skin_;
   }
 
-  void material(object_ptr<glTF::material> material_) {
-    _material = material_;
-  }
-
   void add_child(object_ptr<glTF::node> child_) {
     _children.push_back(child_);
   }
@@ -640,7 +766,6 @@ private:
   std::vector<object_ptr<node>> _children;
   object_ptr<glTF::mesh> _mesh;
   object_ptr<glTF::skin> _skin;
-  object_ptr<glTF::material> _material;
   std::optional<std::array<number, 3>> _position;
   std::optional<std::array<number, 3>> _scale;
   std::optional<std::array<number, 4>> _rotation;
@@ -661,7 +786,7 @@ private:
   std::vector<object_ptr<node>> _nodes;
 };
 
-class document {
+class document : public extendable {
 public:
   using factory_type = object_factory<animation,
                                       buffer,

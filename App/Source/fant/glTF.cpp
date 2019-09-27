@@ -8,11 +8,21 @@ static std::string to_json_string(std::u8string_view string_) {
                      string_.size());
 }
 
+void extendable::serialize_extras_extensions(glTF_json &out_) const {
+  if (!_extensions.empty()) {
+    out_["extensions"] = _extensions;
+  }
+  if (_extras) {
+    out_["extras"] = *_extras;
+  }
+}
+
 glTF_json object_base::serialize(const document &document_) const {
   auto result = glTF_json::object();
   if (!_name.empty()) {
     result["name"] = to_json_string(_name);
   }
+  serialize_extras_extensions(result);
   return result;
 }
 
@@ -211,6 +221,7 @@ glTF_json primitive::serialize(const document &document_) const {
   if (_mode != mode_type::triangles) {
     result["mode"] = static_cast<integer>(_mode);
   }
+  serialize_extras_extensions(result);
   return result;
 }
 
@@ -226,6 +237,89 @@ glTF_json skin::serialize(const document &document_) const {
   if (_inverseBindMatrices) {
     result["inverseBindMatrices"] =
         document_.factory().index_of(_inverseBindMatrices);
+  }
+  return result;
+}
+
+glTF_json
+material::normal_textre_info::serialize(const document &document_) const {
+  auto result = texture_info::serialize(document_);
+  if (_scale != _defaultScale) {
+    result["scale"] = _scale;
+  }
+  return result;
+}
+
+glTF_json
+material::occlusion_textre_info::serialize(const document &document_) const {
+  auto result = texture_info::serialize(document_);
+  if (_stength != _defaultStrength) {
+    result["strength"] = _stength;
+  }
+  return result;
+}
+
+glTF_json material::pbr_metallic_roughness_info::serialize(
+    const document &document_) const {
+  glTF_json result;
+  if (_baseColorFactor != _defaultBaseColorFactor) {
+    result["baseColorFactor"] = _baseColorFactor;
+  }
+  if (_baseColorTexture) {
+    result["baseColorTexture"] = _baseColorTexture->serialize(document_);
+  }
+  if (_metallicFactor != _defaultMetallicFactor) {
+    result["metallicFactor"] = _metallicFactor;
+  }
+  if (_roughnessFactor != _defaultRoughnessFactor) {
+    result["roughnessFactor"] = _roughnessFactor;
+  }
+  if (_metallicRoughnessTexture) {
+    result["metallicRoughnessTexture"] =
+        _metallicRoughnessTexture->serialize(document_);
+  }
+  serialize_extras_extensions(result);
+  return result;
+}
+
+glTF_json material::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  if (_pbrMetallicRoughness) {
+    result["pbrMetallicRoughness"] =
+        _pbrMetallicRoughness->serialize(document_);
+  }
+  if (_normalTexture) {
+    result["normalTexture"] = _normalTexture->serialize(document_);
+  }
+  if (_occlusionTexture) {
+    result["occlusionTexture"] = _occlusionTexture->serialize(document_);
+  }
+  if (_emissiveTexture) {
+    result["emissiveTexture"] = _emissiveTexture->serialize(document_);
+  }
+  if (_emissiveFactor != _defaultEmissiveFactor) {
+    result["emissiveFactor"] = _emissiveFactor;
+  }
+  if (_alphaMode != _defaultAlphaMode) {
+    auto serializeAlphaMode = [this]() {
+      switch (_alphaMode) {
+      case alpha_mode_type::opaque:
+        return "OPAQUE";
+      case alpha_mode_type::blend:
+        return "BLEND";
+      case alpha_mode_type::mask:
+        return "MASK";
+      default:
+        return "";
+      }
+    };
+    result["alphaMode"] = serializeAlphaMode();
+  }
+  if (_alphaCutoff != _defaultAlphaCutoff) {
+    result["alphaCutoff"] = _alphaCutoff;
+  }
+  if (_doubleSided != _defaultDoubleSided) {
+    result["doubleSided"] = _doubleSided;
   }
   return result;
 }
@@ -269,6 +363,7 @@ glTF_json animation::channel::serialize(const document &document_,
   glTF_json result;
   result["sampler"] = animation_.factory().index_of(_sampler);
   result["target"] = _target.serialize(document_);
+  serialize_extras_extensions(result);
   return result;
 }
 
@@ -293,6 +388,7 @@ animation::channel::target_type::serialize(const document &document_) const {
     }
   };
   result["path"] = serializePath();
+  serialize_extras_extensions(result);
   return result;
 }
 
@@ -300,27 +396,26 @@ glTF_json animation::sampler::serialize(const document &document_) const {
   glTF_json result;
   result["input"] = document_.factory().index_of(_input);
   result["output"] = document_.factory().index_of(_output);
+  serialize_extras_extensions(result);
   return result;
 }
 
 glTF_json node::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
   if (_position) {
-    auto t = *_position;
-    if (!(t[0] == 0 && t[1] == 0 && t[2] == 0)) {
+    if (auto t = *_position; !(t[0] == 0 && t[1] == 0 && t[2] == 0)) {
       result["translation"] = *_position;
     }
   }
   if (_rotation) {
-    auto r = *_rotation;
-    if (!(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 1)) {
-      result["rotation"] = *_rotation;
+    if (auto r = *_rotation;
+        !(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 1)) {
+      result["rotation"] = r;
     }
   }
   if (_scale) {
-    auto s = *_scale;
-    if (!(s[0] == 0 && s[1] == 0 && s[2] == 0)) {
-      result["scale"] = *_scale;
+    if (auto s = *_scale; !(s[0] == 1 && s[1] == 1 && s[2] == 1)) {
+      result["scale"] = s;
     }
   }
   if (_matrix) {
@@ -331,9 +426,6 @@ glTF_json node::serialize(const document &document_) const {
   }
   if (_skin) {
     result["skin"] = document_.factory().index_of(_skin);
-  }
-  if (_material) {
-    result["material"] = document_.factory().index_of(_material);
   }
   if (!_children.empty()) {
     glTF_json childrenJson;
@@ -354,6 +446,16 @@ glTF_json scene::serialize(const document &document_) const {
     }
     result["nodes"] = rootNodesJson;
   }
+  return result;
+}
+
+glTF_json texture_info::serialize(const document &document_) const {
+  glTF_json result;
+  result["index"] = document_.factory().index_of(_texture);
+  if (_texCoord != _defaultTexCoord) {
+    result["texCoord"] = _texCoord;
+  }
+  serialize_extras_extensions(result);
   return result;
 }
 
@@ -405,6 +507,7 @@ glTF_json document::serialize(bool rm_uri_of_first_buffer_) const {
   serializeObjectArray(object_type<skin>, "skins");
   serializeObjectArray(object_type<texture>, "textures");
 
+  serialize_extras_extensions(result);
   return result;
 }
 } // namespace fant::glTF

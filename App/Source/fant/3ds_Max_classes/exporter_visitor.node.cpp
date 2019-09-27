@@ -55,21 +55,19 @@ glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
   return glTFNode;
 }
 
+Matrix3 exporter_visitor::_calcOffsetTransformMatrix(INode &max_node_) {
+  Matrix3 tm(1);
+  Point3 pos = max_node_.GetObjOffsetPos();
+  tm.PreTranslate(pos);
+  Quat quat = max_node_.GetObjOffsetRot();
+  PreRotateMatrix(tm, quat);
+  ScaleValue scaleValue = max_node_.GetObjOffsetScale();
+  ApplyScaling(tm, scaleValue);
+  return tm;
+}
+
 glTF::object_ptr<glTF::node>
 exporter_visitor::_trySimulateObjectOffsetTransform(INode &max_node_) {
-  /*
-  Constructing an offset transformation matrix for a node can be done with the
-  following code:
-  ```
-  Matrix3 tm(1);
-  Point3 pos = node->GetObjOffsetPos();
-  tm.PreTranslate(pos);
-  Quat quat = node->GetObjOffsetRot();
-  PreRotateMatrix(tm, quat);
-  ScaleValue scaleValue = node->GetObjOffsetScale();
-  ApplyScaling(tm, scaleValue);
-  ```
-  */
   auto pos = max_node_.GetObjOffsetPos();
   auto rot = max_node_.GetObjOffsetRot();
   auto scaleValue = max_node_.GetObjOffsetScale();

@@ -84,12 +84,20 @@ int exporter_visitor::_mainProc(INode *max_node_) {
 
   auto immMesh = _tryExportMesh(*max_node_);
   if (immMesh) {
-    auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
-    auto glTFMesh = _convertMesh(*immMesh);
+    // auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
+    auto glTFMaterials = _tryExportMaterial(*max_node_);
+    auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
+
     actualNode->mesh(glTFMesh);
-    if (glTFSkin) {
+
+    /*if (glTFSkin) {
       actualNode->skin(glTFSkin);
-    }
+    }*/
+
+    /*auto glTFMaterial = _tryExportMaterial(*max_node_);
+    if (glTFMaterial) {
+      actualNode->material(glTFMaterial);
+    }*/
   }
 
   if (_animBaking) {
@@ -98,5 +106,10 @@ int exporter_visitor::_mainProc(INode *max_node_) {
   }
 
   return TREE_CONTINUE;
+}
+
+std::u8string exporter_visitor::_convertMaxName(const MSTR &max_name_) {
+  return win32::mchar_to_utf8(
+      std::basic_string_view<MCHAR>(max_name_, max_name_.Length()));
 }
 } // namespace fant

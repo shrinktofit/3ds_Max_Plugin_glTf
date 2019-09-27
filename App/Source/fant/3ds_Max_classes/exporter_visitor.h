@@ -22,7 +22,12 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
+
+// Forward declaration for Max::StdMat
+class StdMat;
+class MultiMtl;
 
 namespace fant {
 inline bool
@@ -96,6 +101,10 @@ private:
         return _channels.cend();
       }
 
+      auto channels_size() const {
+        return _channels.size();
+      }
+
       std::byte *add_channel(std::u8string_view channel_name_,
                              glTF::accessor::type_type type_,
                              glTF::accessor::component_type component_) {
@@ -113,8 +122,14 @@ private:
       vertex_count_type _nVertices;
     };
 
+    struct submesh {
+      std::u8string name;
+      MtlID material_id;
+      std::vector<vertex_list::vertex_count_type> indices;
+    };
+
     vertex_list vertices;
-    std::optional<std::vector<vertex_list::vertex_count_type>> indices;
+    std::vector<submesh> submeshes;
   };
 
   int _constructSceneGraphProc(INode *max_node_);
@@ -128,14 +143,29 @@ private:
 
   std::optional<_immediate_mesh> _tryExportMesh(INode &max_node_);
 
-  glTF::object_ptr<glTF::mesh> _convertMesh(const _immediate_mesh &imm_mesh_);
+  glTF::object_ptr<glTF::mesh>
+  _convertMesh(const _immediate_mesh &imm_mesh_,
+               const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
   _immediate_mesh _convertTriObj(TriObject &tri_obj_);
 
   glTF::object_ptr<glTF::skin> _tryExportSkin(INode &max_node_,
                                               _immediate_mesh &imm_mesh_);
 
-  glTF::object_ptr<glTF::skin> _convertSkin(ISkin &max_skin_);
+  glTF::object_ptr<glTF::skin> _convertSkin(INode &max_node_, ISkin &max_skin_);
+
+  std::vector<glTF::object_ptr<glTF::material>>
+  _tryExportMaterial(INode &max_node_);
+
+  std::vector<glTF::object_ptr<glTF::material>>
+  _tryConvertMaterial(Mtl &max_mtl_);
+
+  glTF::object_ptr<glTF::material> _convertStdMaterial(StdMat &max_mtl_);
+
+  std::vector<glTF::object_ptr<glTF::material>>
+  _convertMultiMaterial(MultiMtl &max_mtl_);
+
+  std::optional<glTF::texture_info> _tryConvertTexture(Texmap &tex_map_);
 
   void _bakeAnimation(INode &max_node_,
                       TimeValue start_time_,
@@ -190,6 +220,9 @@ private:
   glTF::document &_document;
   const export_settings &_settings;
   std::unordered_map<INode *, glTF::object_ptr<glTF::node>> _nodeMaps;
+  std::unordered_map<Mtl *, std::vector<glTF::object_ptr<glTF::material>>>
+      _materialMap;
+  std::unordered_map<Texmap *, glTF::texture_info> _textureMap;
   glTF::object_ptr<glTF::scene> _glTFScene;
   glTF::object_ptr<glTF::buffer> _mainBuffer;
   glTF::object_ptr<glTF::animation> _mainAnimation;
@@ -204,10 +237,18 @@ private:
       std::pair<std::vector<TimeValue>, glTF::object_ptr<glTF::accessor>>>
       _animationTimesAccessors;
 
+  static std::u8string _convertMaxName(const MSTR &max_name_);
+
+  static Matrix3 _calcOffsetTransformMatrix(INode &max_node_);
+
   template <typename Out>
-  static void _convertMaxMatrix3ToMat4(const Matrix3 &matrix, Out *out_) {
+  static void _convertMaxMatrix3ToGlTFMat4(const Matrix3 &matrix, Out *out_) {
+    // glTF expect the matrices to be column vector and stored in column majar;
+    // In 3ds Max, all vectors are assumed to be row vectors.
     for (int r = 0; r < 4; ++r) {
       for (int c = 0; c < 3; ++c) {
+        // We actually done the transpose: it should have been `out[c * 4 +
+        // r]`(column major).
         out_[r * 4 + c] = matrix.GetRow(r)[c];
       }
       out_[r * 4 + 3] = 0;
