@@ -2,8 +2,8 @@
 #include "resource.h"
 #include <array>
 #include <charconv>
+#include <fant/3ds_Max_classes/export_settings.h>
 #include <fant/3ds_Max_classes/exporter.h>
-#include <fant/3ds_Max_classes/exporter/export_settings.h>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
 namespace fant {

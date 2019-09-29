@@ -125,7 +125,7 @@ glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(INode &max_node_,
     auto glTFBoneNode = rglTFBoneNode->second;
     auto inverseBindMatrix =
         skinHostNodeWorldTM * Inverse(boneNode->GetNodeTM(0));
-    inverseBindMatrices[iBone] = inverseBindMatrix;
+    inverseBindMatrices[iBone] = _convertIntoGlTFAxisSystem(inverseBindMatrix);
     glTFSkin->add_joint(glTFBoneNode);
   }
 
@@ -138,7 +138,7 @@ glTF::object_ptr<glTF::skin> exporter_visitor::_convertSkin(INode &max_node_,
   for (decltype(inverseBindMatrices.size()) i = 0;
        i < inverseBindMatrices.size(); ++i) {
     _convertMaxMatrix3ToGlTFMat4(inverseBindMatrices[i],
-                             inverseBindMatricesData + 16 * i);
+                                 inverseBindMatricesData + 16 * i);
   }
   glTFSkin->inverse_bind_matrices(inverseBindMatricesAccessor);
 

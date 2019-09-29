@@ -1,8 +1,34 @@
 
+#include <CS/BIPEXP.H>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
-namespace fant {
+std::vector<Point3> compute_normals(Mesh &mesh_, const Point3 *vetices_) {
+  // TODO: smooth group
+  // http://docs.autodesk.com/3DSMAX/16/ENU/3ds-Max-SDK-Programmer-Guide/index.html
+  // Computing Vertex Normals by Weighting
+  std::vector<Point3> result(mesh_.getNumVerts());
+  const auto nFaces = mesh_.getNumFaces();
+  for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
+       ++iFace) {
+    auto &face = mesh_.faces[iFace];
 
+    const auto &v0 = vetices_[face.getVert(0)];
+    const auto &v1 = vetices_[face.getVert(1)];
+    const auto &v2 = vetices_[face.getVert(2)];
+    auto faceNormal = Normalize((v1 - v0) ^ (v2 - v1));
+
+    for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
+      auto iVertex = face.getVert(iFaceVert);
+      result[iVertex] += faceNormal;
+    }
+  }
+  for (auto &normal : result) {
+    normal = Normalize(normal);
+  }
+  return result;
+}
+
+namespace fant {
 std::pair<
     exporter_visitor::_immediate_mesh::vertex_list,
     std::vector<
@@ -62,6 +88,12 @@ exporter_visitor::_tryExportMesh(INode &max_node_) {
     return std::nullopt;
   }
 
+  // We don't want the skeleton.
+  // TODO: filter BIPED_CLASS_ID?
+  if (object->ClassID() == SKELOBJ_CLASS_ID) {
+    // return std::nullopt;
+  }
+
   auto triObject =
       static_cast<TriObject *>(object->ConvertToType(0, {TRIOBJ_CLASS_ID, 0}));
   if (!triObject) {
@@ -87,24 +119,28 @@ exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
 
   _immediate_mesh::vertex_list vertices(nVerts);
 
+  std::vector<Point3> positions(nVerts); // We need it to calculate normal
+  for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
+       ++iVertex) {
+    positions[iVertex] = _convertIntoGlTFAxisSystem(mesh.getVert(iVertex));
+  }
+
+  auto normals = compute_normals(mesh, positions.data());
+
   auto positionChannel = reinterpret_cast<glTF::accessor::component_storage_t<
       glTF::accessor::component_type::the_float> *>(
       vertices.add_channel(glTF::standard_semantics::position,
                            glTF::accessor::type_type::vec3,
                            glTF::accessor::component_type::the_float));
-
   auto normalChannel = reinterpret_cast<glTF::accessor::component_storage_t<
       glTF::accessor::component_type::the_float> *>(
       vertices.add_channel(glTF::standard_semantics::normal,
                            glTF::accessor::type_type::vec3,
                            glTF::accessor::component_type::the_float));
-
   for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
        ++iVertex) {
-    auto &vertex = mesh.getVert(iVertex);
-    _convert(vertex, positionChannel + 3 * iVertex);
-    auto &normal = Normalize(mesh.getNormal(iVertex));
-    _convert(normal, normalChannel + 3 * iVertex);
+    _convert(positions[iVertex], positionChannel + 3 * iVertex);
+    _convert(normals[iVertex], normalChannel + 3 * iVertex);
   }
 
   const auto nFaces = mesh.getNumFaces();
@@ -158,7 +194,7 @@ exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
         auto iVertex = face.getVert(iFaceVert);
         auto pOut = texcoordChannel + 2 * iVertex;
         pOut[0] = uvw.x;
-        pOut[1] = uvw.y;
+        pOut[1] = 1.0 - uvw.y;
       }
     }
   }
@@ -223,34 +259,6 @@ glTF::object_ptr<glTF::mesh> exporter_visitor::_convertMesh(
     }
     attributes.emplace_back(iChannel->first, accessor);
   }
-
-  /*glTF::primitive primitive{glTF::primitive::mode_type::triangles};
-
-  for (auto iChannel = vertices.channels_begin();
-       iChannel != vertices.channels_end(); ++iChannel) {
-    auto accessor =
-        _makeSimpleAccessor(iChannel->second.type, iChannel->second.component,
-                            vertices.vertex_count());
-    std::copy_n(iChannel->second.data.get(),
-                iChannel->second.attribute_bytes() * vertices.vertex_count(),
-                accessor->data());
-    accessor->name(iChannel->first);
-    if (iChannel->first == glTF::standard_semantics::position) {
-      accessor->explicit_bound_required(true);
-    }
-    primitive.emplace_attribute(iChannel->first, accessor);
-  }
-
-  if (imm_mesh_.indices) {
-    auto indicesAccessor = _addIndices(gsl::make_span(*imm_mesh_.indices));
-    primitive.indices(indicesAccessor);
-  }
-
-  auto glTFMesh = _document.factory().make<glTF::mesh>();
-  glTFMesh->name(imm_mesh_.name);
-  glTFMesh->push_primitive(primitive);
-
-  return glTFMesh;*/
 
   auto glTFMesh = _document.factory().make<glTF::mesh>();
   glTFMesh->name(imm_mesh_.name);

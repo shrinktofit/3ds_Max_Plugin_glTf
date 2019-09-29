@@ -324,6 +324,14 @@ glTF_json material::serialize(const document &document_) const {
   return result;
 }
 
+glTF_json texture::serialize(const document &document_) const {
+  auto result = object_base::serialize(document_);
+  if (_source) {
+    result["source"] = document_.factory().index_of(_source);
+  }
+  return result;
+}
+
 glTF_json image::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
   std::visit(
@@ -338,7 +346,17 @@ glTF_json image::serialize(const document &document_) const {
       },
       _source);
   if (_mimeType) {
-    result["mimeType"] = to_json_string(*_mimeType);
+    auto serializeMimeType = [this]() {
+      switch (*_mimeType) {
+      case allowed_mime_type::jpeg:
+        return "image/jpeg";
+      case allowed_mime_type::png:
+        return "image/png";
+      default:
+        return "";
+      }
+    };
+    result["mimeType"] = serializeMimeType();
   }
   return result;
 }

@@ -51,7 +51,7 @@ glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
   auto localNodeTM = _getLocalNodeTransformMatrix(max_node_, 0);
   auto glTFNode = _document.factory().make<glTF::node>();
   glTFNode->name(name);
-  _setTrs(*glTFNode, localNodeTM);
+  _setTrs(*glTFNode, _convertIntoGlTFAxisSystem(localNodeTM));
   return glTFNode;
 }
 
@@ -79,7 +79,9 @@ exporter_visitor::_trySimulateObjectOffsetTransform(INode &max_node_) {
 
   auto glTFNode = _document.factory().make<glTF::node>();
   glTFNode->name(u8"Object Offset Transform");
-  _setTrs(*glTFNode, pos, rot, scaleValue.s);
+  _setTrs(*glTFNode, _convertIntoGlTFAxisSystem(pos),
+          _convertIntoGlTFAxisSystem(rot),
+          _convertIntoGlTFAxisSystem(scaleValue.s));
   return glTFNode;
 }
 } // namespace fant

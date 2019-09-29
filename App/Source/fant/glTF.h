@@ -3,8 +3,7 @@
 
 #include <Max.h>
 #include <cstdint>
-#include <fant/3ds_Max_classes/exporter/export_settings.h>
-#include <fant/3ds_Max_classes/exporter/vertex_list.h>
+#include <fant/3ds_Max_classes/export_settings.h>
 #include <fant/support/to_u8string.h>
 #include <fant/support/win32/mchar_to_utf8.h>
 #include <filesystem>
@@ -425,17 +424,22 @@ private:
 
 class image : public object_base {
 public:
+  enum class allowed_mime_type {
+    jpeg,
+    png,
+  };
+
   void source(std::u8string_view url_) {
     _source = std::u8string(url_.data(), url_.size());
   }
 
   void source(object_ptr<buffer_view> buffer_view_,
-              std::u8string_view mime_type_) {
+              allowed_mime_type mime_type_) {
     _source = buffer_view_;
     _mimeType = mime_type_;
   }
 
-  void mime_type(std::u8string_view mime_type_) {
+  void mime_type(allowed_mime_type mime_type_) {
     _mimeType = mime_type_;
   }
 
@@ -443,14 +447,21 @@ public:
 
 private:
   std::variant<std::monostate, std::u8string, object_ptr<buffer_view>> _source;
-  std::optional<std::u8string> _mimeType;
+  std::optional<allowed_mime_type> _mimeType;
 };
 
 class texture_sampler : public object_base {};
 
 class texture : public object_base {
 public:
+  void source(glTF::object_ptr<glTF::image> image_) {
+    _source = image_;
+  }
+
+  glTF_json serialize(const document &document_) const;
+
 private:
+  glTF::object_ptr<glTF::image> _source;
 };
 
 class texture_info : public extendable {
@@ -753,7 +764,7 @@ public:
   }
 
   void set_rotation(number x_, number y_, number z_, number w_) {
-    _scale.emplace();
+    _rotation.emplace();
     (*_rotation)[0] = x_;
     (*_rotation)[1] = y_;
     (*_rotation)[2] = z_;

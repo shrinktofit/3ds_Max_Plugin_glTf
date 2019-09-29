@@ -57,7 +57,12 @@ exporter_visitor::_convertStdMaterial(StdMat &max_mtl_) {
   glTF::material::pbr_metallic_roughness_info pbrInfo;
 
   auto diffuseColor = max_mtl_.GetDiffuse(0);
-  pbrInfo.base_color_factor(diffuseColor.r, diffuseColor.g, diffuseColor.b);
+  auto opacity = max_mtl_.GetOpacity(0);
+  pbrInfo.base_color_factor(diffuseColor.r, diffuseColor.g, diffuseColor.b,
+                            opacity);
+  if (opacity != 1) {
+    glTFMaterial->alpha_mode(glTF::material::alpha_mode_type::blend);
+  }
 
   if (auto tmap = max_mtl_.GetSubTexmap(ID_DI)) {
     if (auto tinfo = _tryConvertTexture(*tmap)) {

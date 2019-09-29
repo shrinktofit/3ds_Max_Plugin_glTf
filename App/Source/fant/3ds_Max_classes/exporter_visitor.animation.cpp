@@ -33,8 +33,13 @@ void exporter_visitor::_bakeAnimation(INode &max_node_,
   std::vector<Point3> scales(frame_count_);
   for (decltype(localNodeTMs.size()) iTM = 0; iTM < localNodeTMs.size();
        ++iTM) {
-    DecomposeMatrix(localNodeTMs[iTM], positions[iTM], rotations[iTM],
-                    scales[iTM]);
+    Point3 t;
+    Quat r;
+    Point3 s;
+    DecomposeMatrix(localNodeTMs[iTM], t, r, s);
+    positions[iTM] = _convertIntoGlTFAxisSystem(t);
+    rotations[iTM] = _convertIntoGlTFAxisSystem(r);
+    scales[iTM] = _convertIntoGlTFAxisSystem(s);
   }
 
   if (!std::all_of(positions.begin() + 1, positions.end(),

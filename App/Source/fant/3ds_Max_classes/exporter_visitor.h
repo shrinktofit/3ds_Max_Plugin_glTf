@@ -4,8 +4,8 @@
 #include <array>
 #include <charconv>
 #include <decomp.h>
+#include <fant/3ds_Max_classes/export_settings.h>
 #include <fant/3ds_Max_classes/exporter.h>
-#include <fant/3ds_Max_classes/exporter/export_settings.h>
 #include <fant/glTF.h>
 #include <fant/support/win32/get_string_resource.h>
 #include <fant/support/win32/instance.h>
@@ -237,7 +237,15 @@ private:
       std::pair<std::vector<TimeValue>, glTF::object_ptr<glTF::accessor>>>
       _animationTimesAccessors;
 
+  static Matrix3 _convertIntoGlTFAxisSystem(const Matrix3 &max_transform_);
+
+  static Point3 _convertIntoGlTFAxisSystem(const Point3 &max_point_);
+
+  static Quat _convertIntoGlTFAxisSystem(const Quat& max_point_);
+
   static std::u8string _convertMaxName(const MSTR &max_name_);
+
+  static std::filesystem::path _convertMaxPath(const MSTR &max_path_);
 
   static Matrix3 _calcOffsetTransformMatrix(INode &max_node_);
 

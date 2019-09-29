@@ -1,5 +1,6 @@
 
 #include <fant/3ds_Max_classes/exporter_visitor.h>
+#include <filesystem>
 #include <functional>
 
 namespace fant {
@@ -84,20 +85,15 @@ int exporter_visitor::_mainProc(INode *max_node_) {
 
   auto immMesh = _tryExportMesh(*max_node_);
   if (immMesh) {
-    // auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
+     auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
     auto glTFMaterials = _tryExportMaterial(*max_node_);
     auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
 
     actualNode->mesh(glTFMesh);
 
-    /*if (glTFSkin) {
+    if (glTFSkin) {
       actualNode->skin(glTFSkin);
-    }*/
-
-    /*auto glTFMaterial = _tryExportMaterial(*max_node_);
-    if (glTFMaterial) {
-      actualNode->material(glTFMaterial);
-    }*/
+    }
   }
 
   if (_animBaking) {
@@ -108,8 +104,53 @@ int exporter_visitor::_mainProc(INode *max_node_) {
   return TREE_CONTINUE;
 }
 
+static const Matrix3 &get_transform_to_max_axis_system() {
+  static auto toMaxAxisSystem = []() {
+    Matrix3 matrix(TRUE);
+    matrix.SetRotateX(DegToRad(90));
+    return matrix;
+  }();
+  return toMaxAxisSystem;
+}
+
+static const Matrix3 &get_transform_to_max_axis_system_inverse() {
+  static auto result = Inverse(get_transform_to_max_axis_system());
+  return result;
+}
+
+Matrix3
+exporter_visitor::_convertIntoGlTFAxisSystem(const Matrix3 &max_transform_) {
+  return get_transform_to_max_axis_system() * max_transform_ *
+         get_transform_to_max_axis_system_inverse();
+}
+
+Point3 exporter_visitor::_convertIntoGlTFAxisSystem(const Point3 &max_point_) {
+  Matrix3 mat(TRUE);
+  mat.SetTrans(max_point_);
+  mat = _convertIntoGlTFAxisSystem(mat);
+  auto transnew = mat.GetTrans();
+  return transnew;
+}
+
+Quat exporter_visitor::_convertIntoGlTFAxisSystem(const Quat &max_rotation_) {
+  float angle = 0;
+  Point3 axis;
+  AngAxisFromQ(max_rotation_, &angle, axis);
+  auto glAxis = _convertIntoGlTFAxisSystem(axis);
+  // glTF use right-hand rule, Max use left-hand.
+  auto glAngle = -angle;
+  Quat q;
+  q.Set(AngAxis(glAxis, glAngle));
+  return q;
+}
+
 std::u8string exporter_visitor::_convertMaxName(const MSTR &max_name_) {
   return win32::mchar_to_utf8(
       std::basic_string_view<MCHAR>(max_name_, max_name_.Length()));
+}
+
+std::filesystem::path exporter_visitor::_convertMaxPath(const MSTR &max_path_) {
+  return std::filesystem::path(
+      std::basic_string_view<MCHAR>(max_path_, max_path_.Length()));
 }
 } // namespace fant
