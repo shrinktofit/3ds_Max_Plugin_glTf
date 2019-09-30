@@ -36,13 +36,16 @@ void exporter_visitor::_setTrs(glTF::node &node_,
   }
 }
 
-void fant::exporter_visitor::_setTrs(glTF::node &node_,
-                                     const Matrix3 &matrix_) {
+void exporter_visitor::_setTrs(glTF::node &node_, const Matrix3 &matrix_) {
   Point3 t;
   Point3 s;
   Quat r;
   DecomposeMatrix(matrix_, t, r, s);
   _setTrs(node_, t, r, s);
+}
+
+void exporter_visitor::_setTrs(glTF::node &node_, const GMatrix &matrix_) {
+  _setTrs(node_, matrix_.Translation(), matrix_.Rotation(), matrix_.Scaling());
 }
 
 glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
@@ -52,6 +55,42 @@ glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
   auto glTFNode = _document.factory().make<glTF::node>();
   glTFNode->name(name);
   _setTrs(*glTFNode, _convertIntoGlTFAxisSystem(localNodeTM));
+  return glTFNode;
+}
+
+glTF::object_ptr<glTF::node>
+exporter_visitor::_exportNode(IGameNode &igame_node_) {
+  auto glTFNode = _convertNode(igame_node_);
+  for (decltype(igame_node_.GetChildCount()) iChild = 0;
+       iChild < igame_node_.GetChildCount(); ++iChild) {
+    auto childGlTFNode = _exportNode(*igame_node_.GetNodeChild(iChild));
+    glTFNode->add_child(childGlTFNode);
+  }
+  return glTFNode;
+}
+
+glTF::object_ptr<glTF::node>
+exporter_visitor::_convertNode(IGameNode &igame_node_) {
+  auto glTFNode = _document.factory().make<glTF::node>();
+
+  auto name = _convertMaxName(igame_node_.GetName());
+  glTFNode->name(name);
+
+  _setTrs(*glTFNode, igame_node_.GetLocalTM(0));
+
+  auto object = igame_node_.GetIGameObject();
+  switch (object->GetIGameType()) {
+  case IGameObject::ObjectTypes::IGAME_MESH:
+    if (auto immMesh = _tryExportMesh(*igame_node_.GetMaxNode())) {
+      auto glTFMaterials = _tryExportMaterial(*igame_node_.GetMaxNode());
+      auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
+      glTFNode->mesh(glTFMesh);
+    }
+    break;
+  default:
+    break;
+  }
+
   return glTFNode;
 }
 

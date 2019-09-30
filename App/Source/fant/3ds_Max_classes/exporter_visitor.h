@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <IGame/IGame.h>
 #include <array>
 #include <charconv>
 #include <decomp.h>
@@ -138,8 +139,14 @@ private:
 
   glTF::object_ptr<glTF::node> _convertNode(INode &max_node_);
 
+  glTF::object_ptr<glTF::node> _exportNode(IGameNode &igame_node_);
+
+  glTF::object_ptr<glTF::node> _convertNode(IGameNode &igame_node_);
+
   glTF::object_ptr<glTF::node>
   _trySimulateObjectOffsetTransform(INode &max_node_);
+
+  std::optional<_immediate_mesh> _exportMesh(IGameMesh &igame_mesh_);
 
   std::optional<_immediate_mesh> _tryExportMesh(INode &max_node_);
 
@@ -147,7 +154,7 @@ private:
   _convertMesh(const _immediate_mesh &imm_mesh_,
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
-  _immediate_mesh _convertTriObj(TriObject &tri_obj_);
+  _immediate_mesh _convertTriObj(INode &max_node_, TriObject &tri_obj_);
 
   glTF::object_ptr<glTF::skin> _tryExportSkin(INode &max_node_,
                                               _immediate_mesh &imm_mesh_);
@@ -241,7 +248,7 @@ private:
 
   static Point3 _convertIntoGlTFAxisSystem(const Point3 &max_point_);
 
-  static Quat _convertIntoGlTFAxisSystem(const Quat& max_point_);
+  static Quat _convertIntoGlTFAxisSystem(const Quat &max_point_);
 
   static std::u8string _convertMaxName(const MSTR &max_name_);
 
@@ -300,6 +307,8 @@ private:
                const Point3 &s_);
 
   void _setTrs(glTF::node &node_, const Matrix3 &matrix_);
+
+  void _setTrs(glTF::node &node_, const GMatrix &matrix_);
 
   glTF::object_ptr<glTF::accessor>
   _makeSimpleAccessor(glTF::accessor::type_type type_,

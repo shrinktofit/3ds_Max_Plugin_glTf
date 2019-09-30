@@ -1,4 +1,5 @@
 
+#include <IGame/IGame.h>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 #include <filesystem>
 #include <functional>
@@ -50,14 +51,36 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     std::function<int(INode *)> _fx;
   };
 
-  TreeEnumFunctor constructSceneGraph(
+  UserCoord glTFCoord;
+  glTFCoord.rotation = 1; // right handed
+  glTFCoord.xAxis = 1;    // right
+  glTFCoord.yAxis = 2;    // up
+  glTFCoord.zAxis = 5;    // out
+  glTFCoord.uAxis = 0;    // left
+  glTFCoord.vAxis = 0;    // up
+
+  auto conversionManager = GetConversionManager();
+  conversionManager->SetUserCoordSystem(glTFCoord);
+
+  auto igameScene = GetIGameInterface();
+  igameScene->InitialiseIGame();
+  igameScene->SetStaticFrame(0);
+
+  for (decltype(igameScene->GetTopLevelNodeCount()) iTopLevelNode = 0;
+       iTopLevelNode < igameScene->GetTopLevelNodeCount(); ++iTopLevelNode) {
+    auto igameNode = igameScene->GetTopLevelNode(iTopLevelNode);
+    auto glTFRootNode = _exportNode(*igameNode);
+    _glTFScene->add_node(glTFRootNode);
+  }
+
+  /*TreeEnumFunctor constructSceneGraph(
       std::bind(&exporter_visitor::_constructSceneGraphProc, this,
                 std::placeholders::_1));
   scene_.EnumTree(&constructSceneGraph);
 
   TreeEnumFunctor mainProc(
       std::bind(&exporter_visitor::_mainProc, this, std::placeholders::_1));
-  scene_.EnumTree(&mainProc);
+  scene_.EnumTree(&mainProc);*/
 
   if (_document.factory().get_size<glTF::buffer>() == 0) {
     auto demandBuffer = _document.factory().make<glTF::buffer>();
@@ -85,15 +108,15 @@ int exporter_visitor::_mainProc(INode *max_node_) {
 
   auto immMesh = _tryExportMesh(*max_node_);
   if (immMesh) {
-     auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
+    // auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
     auto glTFMaterials = _tryExportMaterial(*max_node_);
     auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
 
     actualNode->mesh(glTFMesh);
 
-    if (glTFSkin) {
+    /*if (glTFSkin) {
       actualNode->skin(glTFSkin);
-    }
+    }*/
   }
 
   if (_animBaking) {

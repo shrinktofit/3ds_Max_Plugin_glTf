@@ -28,6 +28,32 @@ std::vector<Point3> compute_normals(Mesh &mesh_, const Point3 *vetices_) {
   return result;
 }
 
+std::vector<Point3> compute_normals(IGameMesh &igame_mesh_) {
+  // TODO: smooth group
+  // http://docs.autodesk.com/3DSMAX/16/ENU/3ds-Max-SDK-Programmer-Guide/index.html
+  // Computing Vertex Normals by Weighting
+  std::vector<Point3> result(igame_mesh_.GetNumberOfVerts());
+  const auto nFaces = igame_mesh_.GetNumberOfFaces();
+  for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
+       ++iFace) {
+    auto &face = *igame_mesh_.GetFace(iFace);
+    auto iv0 = face.vert[0];
+    auto iv1 = face.vert[1];
+    auto iv2 = face.vert[2];
+    const auto &v0 = igame_mesh_.GetVertex(iv0);
+    const auto &v1 = igame_mesh_.GetVertex(iv1);
+    const auto &v2 = igame_mesh_.GetVertex(iv2);
+    auto faceNormal = Normalize((v1 - v0) ^ (v2 - v1));
+    result[iv0] += faceNormal;
+    result[iv1] += faceNormal;
+    result[iv2] += faceNormal;
+  }
+  for (auto &normal : result) {
+    normal = Normalize(normal);
+  }
+  return result;
+}
+
 namespace fant {
 std::pair<
     exporter_visitor::_immediate_mesh::vertex_list,
@@ -91,7 +117,7 @@ exporter_visitor::_tryExportMesh(INode &max_node_) {
   // We don't want the skeleton.
   // TODO: filter BIPED_CLASS_ID?
   if (object->ClassID() == SKELOBJ_CLASS_ID) {
-    // return std::nullopt;
+    return std::nullopt;
   }
 
   auto triObject =
@@ -100,7 +126,7 @@ exporter_visitor::_tryExportMesh(INode &max_node_) {
     return std::nullopt;
   }
 
-  auto immMesh = _convertTriObj(*triObject);
+  auto immMesh = _convertTriObj(max_node_, *triObject);
   if (triObject != object) {
     triObject->DeleteMe();
   }
@@ -109,13 +135,13 @@ exporter_visitor::_tryExportMesh(INode &max_node_) {
 }
 
 exporter_visitor::_immediate_mesh
-exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
+exporter_visitor::_convertTriObj(INode &max_node_, TriObject &tri_obj_) {
+  // https://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2019/ENU/3DSMax-MAXScript/files/GUID-CBBA20AD-F7D5-46BC-9F5E-5EDA109F9CF4-htm.html
   auto &mesh = tri_obj_.GetMesh();
   auto maxNodeName = tri_obj_.NodeName();
   auto name = _convertMaxName(maxNodeName);
 
   const auto nVerts = mesh.getNumVerts();
-  const auto nVData = mesh.getNumVData();
 
   _immediate_mesh::vertex_list vertices(nVerts);
 
@@ -142,6 +168,8 @@ exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
     _convert(positions[iVertex], positionChannel + 3 * iVertex);
     _convert(normals[iVertex], normalChannel + 3 * iVertex);
   }
+
+  auto mtl = max_node_.GetMtl();
 
   const auto nFaces = mesh.getNumFaces();
   std::unordered_map<MtlID, _immediate_mesh::submesh> submeshes;
@@ -187,9 +215,25 @@ exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
          ++iFace) {
       auto &mapFace = mapFaces[iFace];
       auto &face = mesh.faces[iFace];
+      auto faceMtl = !mtl ? nullptr
+                          : (mtl->NumSubMtls() == 0
+                                 ? mtl
+                                 : mtl->GetSubMtl(mesh.getFaceMtlIndex(iFace)));
       for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
         auto iTVertex = mapFace.getTVert(iFaceVert);
         auto uvw = mesh.getTVert(iTVertex);
+
+        /*if (faceMtl) {
+          auto nSubTexmaps = faceMtl->NumSubTexmaps();
+          for (decltype(nSubTexmaps) iSubTexmap = 0; iSubTexmap < nSubTexmaps;
+               ++iSubTexmap) {
+            auto texmap = faceMtl->GetSubTexmap(iSubTexmap);
+            Matrix3 uvmatrix(TRUE);
+            texmap->GetUVTransform(uvmatrix);
+            auto uvgen = texmap->GetTheUVGen();
+
+          }
+        }*/
 
         auto iVertex = face.getVert(iFaceVert);
         auto pOut = texcoordChannel + 2 * iVertex;
@@ -222,11 +266,6 @@ exporter_visitor::_convertTriObj(TriObject &tri_obj_) {
   }
 
   for (std::remove_const_t<decltype(nMaps)> iMap = 0; iMap < nMaps; ++iMap) {
-  }
-
-  for (std::remove_const_t<decltype(nVData)> iVData = 0; iVData < nVData;
-       ++iVData) {
-    auto vData = mesh.vData[iVData];
   }
 
   std::vector<_immediate_mesh::submesh> submeshesArray(submeshes.size());
@@ -376,5 +415,91 @@ glTF::object_ptr<glTF::accessor> exporter_visitor::_addIndices(
       bufferView, 0, glTfComponentType, glTF::accessor::type_type::scalar,
       static_cast<std::uint32_t>(indices_.size()));
   return accessor;
+}
+
+std::optional<exporter_visitor::_immediate_mesh>
+exporter_visitor::_exportMesh(IGameMesh &igame_mesh_) {
+  // https://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2019/ENU/3DSMax-MAXScript/files/GUID-CBBA20AD-F7D5-46BC-9F5E-5EDA109F9CF4-htm.html
+  // https://help.autodesk.com/view/3DSMAX/2015/ENU/?guid=__cpp_ref_idx__r_list_of_mapping_channel_index_values_html_html
+  // > The mesh mapping channel may be specified as one of the following:
+  // >   0: Vertex Color channel.
+  // >   1: Default mapping channel(the TVert array).
+  // >   2 through MAX_MESHMAPS - 1 : The new mapping channels available in
+  // release 3.0.
+
+  auto name = _convertMaxName(igame_mesh_.GetClassName());
+
+  const auto nVerts = igame_mesh_.GetNumberOfVerts();
+
+  _immediate_mesh::vertex_list vertices(nVerts);
+
+  auto normals = compute_normals(igame_mesh_);
+
+  auto positionChannel = reinterpret_cast<glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::the_float> *>(
+      vertices.add_channel(glTF::standard_semantics::position,
+                           glTF::accessor::type_type::vec3,
+                           glTF::accessor::component_type::the_float));
+  auto normalChannel = reinterpret_cast<glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::the_float> *>(
+      vertices.add_channel(glTF::standard_semantics::normal,
+                           glTF::accessor::type_type::vec3,
+                           glTF::accessor::component_type::the_float));
+  for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
+       ++iVertex) {
+    auto vertex = igame_mesh_.GetVertex(iVertex);
+    _convert(vertex, positionChannel + 3 * iVertex);
+    _convert(normals[iVertex], normalChannel + 3 * iVertex);
+  }
+
+  auto nFaces = igame_mesh_.GetNumberOfFaces();
+
+  std::unordered_map<MtlID, _immediate_mesh::submesh> submeshes;
+  for (std::remove_const_t<decltype(igame_mesh_.GetNumberOfFaces())> iFace = 0;
+       iFace < igame_mesh_.GetNumberOfFaces(); ++iFace) {
+    auto &face = *igame_mesh_.GetFace(iFace);
+    auto mtlIndex = face.matID;
+    auto submesh = submeshes.try_emplace(mtlIndex);
+    if (submesh.second) {
+      submesh.first->second.material_id = mtlIndex;
+      submesh.first->second.indices.reserve(3 * igame_mesh_.GetNumberOfFaces());
+    }
+    auto &indices = submesh.first->second.indices;
+    indices.push_back(face.vert[0]);
+    indices.push_back(face.vert[1]);
+    indices.push_back(face.vert[2]);
+  }
+
+  auto mapNums = igame_mesh_.GetActiveMapChannelNum();
+  for (decltype(mapNums.Count()) iMapNum = 0; iMapNum < mapNums.Count();
+       ++iMapNum) {
+    auto iMap = mapNums[iMapNum];
+    auto set = iMap - 1;
+    auto texcoordChannel = reinterpret_cast<glTF::accessor::component_storage_t<
+        glTF::accessor::component_type::the_float> *>(
+        vertices.add_channel(glTF::standard_semantics::texcoord(set),
+                             glTF::accessor::type_type::vec2,
+                             glTF::accessor::component_type::the_float));
+    // auto nMapVerts = igame_mesh_.GetNumberOfMapVerts(iMap);
+    // for (decltype(nMapVerts) iMapVert = 0; iMapVert < nMapVerts; ++iMapVert)
+    // {
+    //  Point3 v;
+    //  if (igame_mesh_.GetMapVertex(iMap, iMapVert, v)) {
+    //    //use data here
+    //  }
+    //}
+    // for (decltype(igame_mesh_.GetNumberOfFaces()) iFace = 0;
+    //     iFace < igame_mesh_.GetNumberOfFaces(); ++iFace) {
+    //  DWORD v[3];
+    //  igame_mesh_.GetMapFaceIndex(iMap, iFace, v);
+    //  //use data here
+    //}
+  }
+
+  std::vector<_immediate_mesh::submesh> submeshesArray(submeshes.size());
+  std::transform(submeshes.begin(), submeshes.end(), submeshesArray.begin(),
+                 [](auto &kv) { return std::move(kv.second); });
+
+  return _immediate_mesh{name, std::move(vertices), std::move(submeshesArray)};
 }
 } // namespace fant

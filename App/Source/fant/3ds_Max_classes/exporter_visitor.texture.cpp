@@ -54,6 +54,12 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
     return r->second;
   }
 
+  /*Matrix3 uvTransform(TRUE);
+  tex_map_.GetUVTransform(uvTransform);
+  if (!uvTransform.IsIdentity()) {
+    uvTransform.IdentityMatrix();
+  }*/
+
   auto glTFTexture = _document.factory().make<glTF::texture>();
   glTFTexture->name(_convertMaxName(tex_map_.GetName()));
 
@@ -116,6 +122,7 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
     glTFTexture->source(glTFImage);
   }
 
+  _textureMap.emplace(&tex_map_, glTFTexture);
   return {
       glTFTexture,
   };
