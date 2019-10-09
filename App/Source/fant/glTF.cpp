@@ -333,6 +333,16 @@ glTF_json texture::serialize(const document &document_) const {
 }
 
 glTF_json image::serialize(const document &document_) const {
+  auto serializeMimeType = [this]() {
+    switch (*_mimeType) {
+    case allowed_mime_type::jpeg:
+      return "image/jpeg";
+    case allowed_mime_type::png:
+      return "image/png";
+    default:
+      return "";
+    }
+  };
   auto result = object_base::serialize(document_);
   std::visit(
       [&](const auto &real_source_) {
@@ -340,22 +350,20 @@ glTF_json image::serialize(const document &document_) const {
         if constexpr (std::is_same_v<RealSource, std::u8string>) {
           result["uri"] = to_json_string(real_source_);
         } else if constexpr (std::is_same_v<RealSource,
+                                            std::vector<std::byte>>) {
+          auto dataBase64 = cppcodec::base64_rfc4648::encode(
+              reinterpret_cast<const std::uint8_t *>(real_source_.data()),
+              real_source_.size());
+          auto dataUri = std::string("data:") + serializeMimeType() +
+                         ";base64," + dataBase64;
+          result["uri"] = dataUri;
+        } else if constexpr (std::is_same_v<RealSource,
                                             object_ptr<buffer_view>>) {
           result["bufferView"] = document_.factory().index_of(real_source_);
         }
       },
       _source);
   if (_mimeType) {
-    auto serializeMimeType = [this]() {
-      switch (*_mimeType) {
-      case allowed_mime_type::jpeg:
-        return "image/jpeg";
-      case allowed_mime_type::png:
-        return "image/png";
-      default:
-        return "";
-      }
-    };
     result["mimeType"] = serializeMimeType();
   }
   return result;

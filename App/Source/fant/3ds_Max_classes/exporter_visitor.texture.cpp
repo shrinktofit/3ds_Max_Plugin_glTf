@@ -1,5 +1,4 @@
 #include <bitmap.h>
-#include <cppcodec/base64_rfc4648.hpp>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 #include <fant/support/uri_utility.h>
 #include <filesystem>
@@ -54,11 +53,11 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
     return r->second;
   }
 
-  /*Matrix3 uvTransform(TRUE);
+  Matrix3 uvTransform(TRUE);
   tex_map_.GetUVTransform(uvTransform);
   if (!uvTransform.IsIdentity()) {
     uvTransform.IdentityMatrix();
-  }*/
+  }
 
   auto glTFTexture = _document.factory().make<glTF::texture>();
   glTFTexture->name(_convertMaxName(tex_map_.GetName()));
@@ -107,14 +106,17 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
           // TO DO error
         } else {
           auto imageFileBuffer = read_binary_file(fullPath);
-          auto bufferView = _document.factory().make<glTF::buffer_view>(
+
+          /*auto bufferView = _document.factory().make<glTF::buffer_view>(
               _mainBuffer, imageFileBuffer.size(), 0);
           std::copy_n(imageFileBuffer.data(), imageFileBuffer.size(),
                       bufferView->data());
-          glTFImage->source(bufferView, *mimeType);
+          glTFImage->source(bufferView, *mimeType);*/
 
           /*auto uri = uri_from_path(fullPath);
           glTFImage->source(uri);*/
+
+          glTFImage->source(imageFileBuffer, *mimeType);
         }
       }
     }

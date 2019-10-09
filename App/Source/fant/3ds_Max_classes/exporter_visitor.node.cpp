@@ -45,7 +45,12 @@ void exporter_visitor::_setTrs(glTF::node &node_, const Matrix3 &matrix_) {
 }
 
 void exporter_visitor::_setTrs(glTF::node &node_, const GMatrix &matrix_) {
-  _setTrs(node_, matrix_.Translation(), matrix_.Rotation(), matrix_.Scaling());
+  _setTrs(node_, (matrix_.Translation()), (matrix_.Rotation()),
+          (matrix_.Scaling()));
+  return;
+  _setTrs(node_, _convertIntoGlTFAxisSystem(matrix_.Translation()),
+          _convertIntoGlTFAxisSystem(matrix_.Rotation()),
+          _convertIntoGlTFAxisSystem(matrix_.Scaling()));
 }
 
 glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
@@ -60,37 +65,24 @@ glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
 
 glTF::object_ptr<glTF::node>
 exporter_visitor::_exportNode(IGameNode &igame_node_) {
-  auto glTFNode = _convertNode(igame_node_);
+  auto glTFNode = _document.factory().make<glTF::node>();
+
+  auto name = _convertMaxName(igame_node_.GetName());
+  glTFNode->name(name);
+  auto namen = reinterpret_cast<const char*>(name.c_str());
+
+  auto gameWTM = igame_node_.GetWorldTM(0);
+  auto rawWTM = GMatrix(igame_node_.GetMaxNode()->GetNodeTM(0));
+
+  _setTrs(*glTFNode, igame_node_.GetLocalTM(0));
+
   for (decltype(igame_node_.GetChildCount()) iChild = 0;
        iChild < igame_node_.GetChildCount(); ++iChild) {
     auto childGlTFNode = _exportNode(*igame_node_.GetNodeChild(iChild));
     glTFNode->add_child(childGlTFNode);
   }
-  return glTFNode;
-}
 
-glTF::object_ptr<glTF::node>
-exporter_visitor::_convertNode(IGameNode &igame_node_) {
-  auto glTFNode = _document.factory().make<glTF::node>();
-
-  auto name = _convertMaxName(igame_node_.GetName());
-  glTFNode->name(name);
-
-  _setTrs(*glTFNode, igame_node_.GetLocalTM(0));
-
-  auto object = igame_node_.GetIGameObject();
-  switch (object->GetIGameType()) {
-  case IGameObject::ObjectTypes::IGAME_MESH:
-    if (auto immMesh = _tryExportMesh(*igame_node_.GetMaxNode())) {
-      auto glTFMaterials = _tryExportMaterial(*igame_node_.GetMaxNode());
-      auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
-      glTFNode->mesh(glTFMesh);
-    }
-    break;
-  default:
-    break;
-  }
-
+  _nodeMaps2.emplace(&igame_node_, glTFNode);
   return glTFNode;
 }
 

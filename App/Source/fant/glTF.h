@@ -439,6 +439,12 @@ public:
     _mimeType = mime_type_;
   }
 
+  void source(gsl::span<std::byte> image_data_, allowed_mime_type mime_type_) {
+    _source.emplace<std::vector<std::byte>>(image_data_.begin(),
+                                            image_data_.end());
+    _mimeType = mime_type_;
+  }
+
   void mime_type(allowed_mime_type mime_type_) {
     _mimeType = mime_type_;
   }
@@ -446,7 +452,11 @@ public:
   glTF_json serialize(const document &document_) const;
 
 private:
-  std::variant<std::monostate, std::u8string, object_ptr<buffer_view>> _source;
+  std::variant<std::monostate,
+               std::u8string,
+               object_ptr<buffer_view>,
+               std::vector<std::byte>>
+      _source;
   std::optional<allowed_mime_type> _mimeType;
 };
 

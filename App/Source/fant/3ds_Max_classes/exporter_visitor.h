@@ -124,13 +124,13 @@ private:
     };
 
     struct submesh {
-      std::u8string name;
       MtlID material_id;
       std::vector<vertex_list::vertex_count_type> indices;
     };
 
     vertex_list vertices;
     std::vector<submesh> submeshes;
+    std::vector<int> vertex_resort;
   };
 
   int _constructSceneGraphProc(INode *max_node_);
@@ -141,12 +141,11 @@ private:
 
   glTF::object_ptr<glTF::node> _exportNode(IGameNode &igame_node_);
 
-  glTF::object_ptr<glTF::node> _convertNode(IGameNode &igame_node_);
-
   glTF::object_ptr<glTF::node>
   _trySimulateObjectOffsetTransform(INode &max_node_);
 
-  std::optional<_immediate_mesh> _exportMesh(IGameMesh &igame_mesh_);
+  std::optional<_immediate_mesh> _exportMesh(IGameNode &igame_node_,
+                                             IGameMesh &igame_mesh_);
 
   std::optional<_immediate_mesh> _tryExportMesh(INode &max_node_);
 
@@ -155,6 +154,10 @@ private:
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
   _immediate_mesh _convertTriObj(INode &max_node_, TriObject &tri_obj_);
+
+  glTF::object_ptr<glTF::skin> _exportSkin(IGameNode &igame_node_,
+                                           IGameSkin &igame_skin_,
+                                           _immediate_mesh &imm_mesh_);
 
   glTF::object_ptr<glTF::skin> _tryExportSkin(INode &max_node_,
                                               _immediate_mesh &imm_mesh_);
@@ -181,10 +184,29 @@ private:
                       glTF::object_ptr<glTF::node> glTF_node_,
                       glTF::object_ptr<glTF::accessor> input_);
 
+  void _bakeAnimation(IGameNode &igame_node_,
+                      TimeValue start_time_,
+                      TimeValue step_,
+                      TimeValue frame_count_,
+                      glTF::object_ptr<glTF::node> glTF_node_,
+                      glTF::object_ptr<glTF::accessor> input_);
+
   template <typename Out> void _convert(const Point3 &value_, Out *out_) {
     out_[0] = value_.x;
     out_[1] = value_.y;
     out_[2] = value_.z;
+  }
+
+  template <typename Out> void _convert(const GMatrix &value_, Out *out_) {
+    // glTF expect the matrices to be column vector and stored in column majar;
+    // In 3ds Max, all vectors are assumed to be row vectors.
+    for (int r = 0; r < 4; ++r) {
+      for (int c = 0; c < 4; ++c) {
+        // We actually done the transpose: it should have been `out[c * 4 +
+        // r]`(column major).
+        out_[r * 4 + c] = value_.GetRow(r)[c];
+      }
+    }
   }
 
   void _writePoint3(float *output_, const Point3 &p_) {
@@ -227,6 +249,7 @@ private:
   glTF::document &_document;
   const export_settings &_settings;
   std::unordered_map<INode *, glTF::object_ptr<glTF::node>> _nodeMaps;
+  std::unordered_map<IGameNode *, glTF::object_ptr<glTF::node>> _nodeMaps2;
   std::unordered_map<Mtl *, std::vector<glTF::object_ptr<glTF::material>>>
       _materialMap;
   std::unordered_map<Texmap *, glTF::texture_info> _textureMap;
@@ -243,6 +266,8 @@ private:
   std::vector<
       std::pair<std::vector<TimeValue>, glTF::object_ptr<glTF::accessor>>>
       _animationTimesAccessors;
+
+  static GMatrix _convertIntoGlTFAxisSystem(const GMatrix &max_transform_);
 
   static Matrix3 _convertIntoGlTFAxisSystem(const Matrix3 &max_transform_);
 

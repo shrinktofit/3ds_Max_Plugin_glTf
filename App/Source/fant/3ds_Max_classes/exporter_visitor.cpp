@@ -1,5 +1,6 @@
 
 #include <IGame/IGame.h>
+#include <cppcodec/base64_rfc4648.hpp>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 #include <filesystem>
 #include <functional>
@@ -51,6 +52,8 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     std::function<int(INode *)> _fx;
   };
 
+  auto igameScene = GetIGameInterface();
+
   UserCoord glTFCoord;
   glTFCoord.rotation = 1; // right handed
   glTFCoord.xAxis = 1;    // right
@@ -60,10 +63,14 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
   glTFCoord.vAxis = 0;    // up
 
   auto conversionManager = GetConversionManager();
-  conversionManager->SetUserCoordSystem(glTFCoord);
+  // conversionManager->SetUserCoordSystem(glTFCoord);
+  conversionManager->SetCoordSystem(
+      IGameConversionManager::CoordSystem::IGAME_OGL);
 
-  auto igameScene = GetIGameInterface();
-  igameScene->InitialiseIGame();
+  if (!igameScene->InitialiseIGame()) {
+    throw std::runtime_error("Failed to initialise 3DXI.");
+  }
+
   igameScene->SetStaticFrame(0);
 
   for (decltype(igameScene->GetTopLevelNodeCount()) iTopLevelNode = 0;
@@ -72,6 +79,36 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     auto glTFRootNode = _exportNode(*igameNode);
     _glTFScene->add_node(glTFRootNode);
   }
+
+  for (auto &nodeMap : _nodeMaps2) {
+    auto &igameNode = *nodeMap.first;
+    auto &glTFNode = nodeMap.second;
+    auto object = igameNode.GetIGameObject();
+    switch (object->GetIGameType()) {
+    case IGameObject::ObjectTypes::IGAME_MESH: {
+      auto &igameMesh = static_cast<IGameMesh &>(*object);
+      if (auto immMesh = _exportMesh(igameNode, igameMesh)) {
+        glTF::object_ptr<glTF::skin> glTFSkin;
+        if (igameMesh.IsObjectSkinned()) {
+          /*glTFSkin =
+              _exportSkin(igameNode, *igameMesh.GetIGameSkin(), *immMesh);*/
+        }
+        auto glTFMaterials = _tryExportMaterial(*igameNode.GetMaxNode());
+        auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
+        glTFNode->mesh(glTFMesh);
+        if (glTFSkin) {
+          glTFNode->skin(glTFSkin);
+        }
+      }
+    } break;
+    default:
+      break;
+    }
+    _bakeAnimation(igameNode, _animBaking->start, _animBaking->step,
+                   _animBaking->frame_count, glTFNode, _animBaking->input);
+  }
+
+  igameScene->ReleaseIGame();
 
   /*TreeEnumFunctor constructSceneGraph(
       std::bind(&exporter_visitor::_constructSceneGraphProc, this,
@@ -139,6 +176,12 @@ static const Matrix3 &get_transform_to_max_axis_system() {
 static const Matrix3 &get_transform_to_max_axis_system_inverse() {
   static auto result = Inverse(get_transform_to_max_axis_system());
   return result;
+}
+
+GMatrix fant::exporter_visitor::_convertIntoGlTFAxisSystem(
+    const GMatrix &max_transform_) {
+  return GMatrix(get_transform_to_max_axis_system()) * max_transform_ *
+         GMatrix(get_transform_to_max_axis_system_inverse());
 }
 
 Matrix3
