@@ -39,19 +39,6 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     _animBaking->input = inputAccessor;
   }
 
-  class TreeEnumFunctor : public ITreeEnumProc {
-  public:
-    TreeEnumFunctor(std::function<int(INode *)> fx_) : _fx(fx_) {
-    }
-
-    int callback(INode *max_node_) {
-      return _fx(max_node_);
-    }
-
-  protected:
-    std::function<int(INode *)> _fx;
-  };
-
   auto igameScene = GetIGameInterface();
 
   UserCoord glTFCoord;
@@ -110,58 +97,10 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
 
   igameScene->ReleaseIGame();
 
-  /*TreeEnumFunctor constructSceneGraph(
-      std::bind(&exporter_visitor::_constructSceneGraphProc, this,
-                std::placeholders::_1));
-  scene_.EnumTree(&constructSceneGraph);
-
-  TreeEnumFunctor mainProc(
-      std::bind(&exporter_visitor::_mainProc, this, std::placeholders::_1));
-  scene_.EnumTree(&mainProc);*/
-
   if (_document.factory().get_size<glTF::buffer>() == 0) {
     auto demandBuffer = _document.factory().make<glTF::buffer>();
     demandBuffer->allocate(1, 0);
   }
-}
-
-int exporter_visitor::_mainProc(INode *max_node_) {
-  auto rglTFNode = _nodeMaps.find(max_node_);
-  if (rglTFNode == _nodeMaps.end()) {
-    assert(false);
-    return TREE_CONTINUE;
-  }
-
-  auto glTFNode = rglTFNode->second;
-
-  auto objectOffsetTransformNode =
-      _trySimulateObjectOffsetTransform(*max_node_);
-  if (objectOffsetTransformNode) {
-    glTFNode->add_child(objectOffsetTransformNode);
-  }
-
-  auto actualNode =
-      objectOffsetTransformNode ? objectOffsetTransformNode : glTFNode;
-
-  auto immMesh = _tryExportMesh(*max_node_);
-  if (immMesh) {
-    // auto glTFSkin = _tryExportSkin(*max_node_, *immMesh);
-    auto glTFMaterials = _tryExportMaterial(*max_node_);
-    auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
-
-    actualNode->mesh(glTFMesh);
-
-    /*if (glTFSkin) {
-      actualNode->skin(glTFSkin);
-    }*/
-  }
-
-  if (_animBaking) {
-    _bakeAnimation(*max_node_, _animBaking->start, _animBaking->step,
-                   _animBaking->frame_count, glTFNode, _animBaking->input);
-  }
-
-  return TREE_CONTINUE;
 }
 
 static const Matrix3 &get_transform_to_max_axis_system() {
@@ -218,5 +157,42 @@ std::u8string exporter_visitor::_convertMaxName(const MSTR &max_name_) {
 std::filesystem::path exporter_visitor::_convertMaxPath(const MSTR &max_path_) {
   return std::filesystem::path(
       std::basic_string_view<MCHAR>(max_path_, max_path_.Length()));
+}
+
+Matrix3 exporter_visitor::_getLocalNodeTransformMatrix(INode &max_node_,
+                                                       TimeValue time_) {
+  auto worldTM = max_node_.GetNodeTM(time_);
+  if (!max_node_.GetParentNode()->IsRootNode()) {
+    auto inverseParent = Inverse(max_node_.GetParentNode()->GetNodeTM(time_));
+    return worldTM * inverseParent;
+  } else {
+    return worldTM;
+  }
+}
+
+GMatrix
+exporter_visitor::_getObjectOffsetTransformMatrix(IGameNode &igame_node_,
+                                                  TimeValue time_) {
+  auto objectOffsetWorld = igame_node_.GetObjectTM(time_);
+  auto invObjectdOffsetWorld = objectOffsetWorld.Inverse();
+  auto worldTM = igame_node_.GetWorldTM(time_);
+  return invObjectdOffsetWorld * worldTM;
+}
+
+Point3 exporter_visitor::_transformPoint(const GMatrix &matrix_,
+                                         const Point3 &point_) {
+  return point_ * matrix_;
+}
+
+Point3 exporter_visitor::_transformVector(const GMatrix &matrix_,
+                                          const Point3 &point_) {
+  auto inversed = GMatrix(matrix_).Inverse();
+
+  GMatrix inverseTransposed;
+  for (int r = 0; r < 4; ++r) {
+    inverseTransposed.SetRow(r, Point4(inversed.GetColumn(r)));
+  }
+
+  return point_ * inverseTransposed;
 }
 } // namespace fant

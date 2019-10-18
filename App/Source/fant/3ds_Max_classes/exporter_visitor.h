@@ -63,6 +63,11 @@ private:
     std::u8string name;
     struct vertex_list {
     public:
+      vertex_list &operator=(vertex_list &&) = default;
+      vertex_list(vertex_list &&) = default;
+      vertex_list &operator=(const vertex_list &) = delete;
+      vertex_list(const vertex_list &) = delete;
+
       using vertex_count_type = glTF::integer;
 
       struct channel_type {
@@ -124,18 +129,42 @@ private:
     };
 
     struct submesh {
+      using indices_type = std::vector<vertex_list::vertex_count_type>;
+
+      submesh(vertex_list &&vertices_)
+          : material_id(0), vertices(std::move(vertices_)) {
+      }
+
+      submesh(vertex_list &&vertices_, indices_type &&indices_)
+          : material_id(0), vertices(std::move(vertices_)),
+            indices(std::move(indices_)) {
+      }
+
+      submesh(MtlID material_id_, vertex_list &&vertices_)
+          : material_id(material_id_), vertices(std::move(vertices_)) {
+      }
+
+      submesh(MtlID material_id_,
+              vertex_list &&vertices_,
+              indices_type &&indices_)
+          : material_id(material_id_), vertices(std::move(vertices_)),
+            indices(std::move(indices_)) {
+      }
+
       MtlID material_id;
-      std::vector<vertex_list::vertex_count_type> indices;
+      std::optional<indices_type> indices;
+      vertex_list vertices;
     };
 
-    vertex_list vertices;
     std::vector<submesh> submeshes;
     std::vector<int> vertex_resort;
+
+    _immediate_mesh() = delete;
+
+    _immediate_mesh(std::u8string &&name_, std::vector<submesh> &&submeshes_)
+        : name(std::move(name_)), submeshes(std::move(submeshes_)) {
+    }
   };
-
-  int _constructSceneGraphProc(INode *max_node_);
-
-  int _mainProc(INode *max_node_);
 
   glTF::object_ptr<glTF::node> _convertNode(INode &max_node_);
 
@@ -147,22 +176,16 @@ private:
   std::optional<_immediate_mesh> _exportMesh(IGameNode &igame_node_,
                                              IGameMesh &igame_mesh_);
 
-  std::optional<_immediate_mesh> _tryExportMesh(INode &max_node_);
+  std::optional<_immediate_mesh> _exportMeshIndexed(IGameNode &igame_node_,
+                                                    IGameMesh &igame_mesh_);
 
   glTF::object_ptr<glTF::mesh>
   _convertMesh(const _immediate_mesh &imm_mesh_,
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
-  _immediate_mesh _convertTriObj(INode &max_node_, TriObject &tri_obj_);
-
   glTF::object_ptr<glTF::skin> _exportSkin(IGameNode &igame_node_,
                                            IGameSkin &igame_skin_,
                                            _immediate_mesh &imm_mesh_);
-
-  glTF::object_ptr<glTF::skin> _tryExportSkin(INode &max_node_,
-                                              _immediate_mesh &imm_mesh_);
-
-  glTF::object_ptr<glTF::skin> _convertSkin(INode &max_node_, ISkin &max_skin_);
 
   std::vector<glTF::object_ptr<glTF::material>>
   _tryExportMaterial(INode &max_node_);
@@ -225,10 +248,6 @@ private:
   glTF::object_ptr<glTF::accessor>
   _addIndices(gsl::span<const _immediate_mesh::vertex_list::vertex_count_type>
                   indices_);
-
-  glTF::object_ptr<glTF::animation> _getOrCreateGlTFAnimation() {
-    return nullptr;
-  }
 
   static bool _approxEqual(float lhs_, float rhs_) {
     return std::fabs(lhs_ - rhs_) < 1.0e-5f;
@@ -380,14 +399,13 @@ private:
   }
 
   static Matrix3 _getLocalNodeTransformMatrix(INode &max_node_,
-                                              TimeValue time_) {
-    auto worldTM = max_node_.GetNodeTM(time_);
-    if (!max_node_.GetParentNode()->IsRootNode()) {
-      auto inverseParent = Inverse(max_node_.GetParentNode()->GetNodeTM(time_));
-      return worldTM * inverseParent;
-    } else {
-      return worldTM;
-    }
-  }
+    TimeValue time_);
+
+  static GMatrix _getObjectOffsetTransformMatrix(IGameNode &igame_node_,
+                                                 TimeValue time_);
+
+  static Point3 _transformPoint(const GMatrix &matrix_, const Point3 &point_);
+
+  static Point3 _transformVector(const GMatrix& matrix_, const Point3& point_);
 };
 } // namespace fant

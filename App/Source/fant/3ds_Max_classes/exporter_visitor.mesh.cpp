@@ -2,58 +2,6 @@
 #include <CS/BIPEXP.H>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
-std::vector<Point3> compute_normals(Mesh &mesh_, const Point3 *vetices_) {
-  // TODO: smooth group
-  // http://docs.autodesk.com/3DSMAX/16/ENU/3ds-Max-SDK-Programmer-Guide/index.html
-  // Computing Vertex Normals by Weighting
-  std::vector<Point3> result(mesh_.getNumVerts());
-  const auto nFaces = mesh_.getNumFaces();
-  for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
-       ++iFace) {
-    auto &face = mesh_.faces[iFace];
-
-    const auto &v0 = vetices_[face.getVert(0)];
-    const auto &v1 = vetices_[face.getVert(1)];
-    const auto &v2 = vetices_[face.getVert(2)];
-    auto faceNormal = Normalize((v1 - v0) ^ (v2 - v1));
-
-    for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
-      auto iVertex = face.getVert(iFaceVert);
-      result[iVertex] += faceNormal;
-    }
-  }
-  for (auto &normal : result) {
-    normal = Normalize(normal);
-  }
-  return result;
-}
-
-std::vector<Point3> compute_normals(IGameMesh &igame_mesh_) {
-  // TODO: smooth group
-  // http://docs.autodesk.com/3DSMAX/16/ENU/3ds-Max-SDK-Programmer-Guide/index.html
-  // Computing Vertex Normals by Weighting
-  std::vector<Point3> result(igame_mesh_.GetNumberOfVerts());
-  const auto nFaces = igame_mesh_.GetNumberOfFaces();
-  for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
-       ++iFace) {
-    auto &face = *igame_mesh_.GetFace(iFace);
-    auto iv0 = face.vert[0];
-    auto iv1 = face.vert[1];
-    auto iv2 = face.vert[2];
-    const auto &v0 = igame_mesh_.GetVertex(iv0, true);
-    const auto &v1 = igame_mesh_.GetVertex(iv1, true);
-    const auto &v2 = igame_mesh_.GetVertex(iv2, true);
-    auto faceNormal = Normalize((v1 - v0) ^ (v2 - v1));
-    result[iv0] += faceNormal;
-    result[iv1] += faceNormal;
-    result[iv2] += faceNormal;
-  }
-  for (auto &normal : result) {
-    normal = Normalize(normal);
-  }
-  return result;
-}
-
 namespace fant {
 std::pair<
     exporter_visitor::_immediate_mesh::vertex_list,
@@ -107,209 +55,36 @@ exporter_visitor::_immediate_mesh::vertex_list::to_indexed() const {
   };
 }
 
-std::optional<exporter_visitor::_immediate_mesh>
-exporter_visitor::_tryExportMesh(INode &max_node_) {
-  auto object = max_node_.EvalWorldState(0).obj;
-  if (!object->CanConvertToType({TRIOBJ_CLASS_ID, 0})) {
-    return std::nullopt;
-  }
-
-  // We don't want the skeleton.
-  // TODO: filter BIPED_CLASS_ID?
-  if (object->ClassID() == SKELOBJ_CLASS_ID) {
-    return std::nullopt;
-  }
-
-  auto triObject =
-      static_cast<TriObject *>(object->ConvertToType(0, {TRIOBJ_CLASS_ID, 0}));
-  if (!triObject) {
-    return std::nullopt;
-  }
-
-  auto immMesh = _convertTriObj(max_node_, *triObject);
-  if (triObject != object) {
-    triObject->DeleteMe();
-  }
-
-  return immMesh;
-}
-
-exporter_visitor::_immediate_mesh
-exporter_visitor::_convertTriObj(INode &max_node_, TriObject &tri_obj_) {
-  // https://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2019/ENU/3DSMax-MAXScript/files/GUID-CBBA20AD-F7D5-46BC-9F5E-5EDA109F9CF4-htm.html
-  auto &mesh = tri_obj_.GetMesh();
-  auto maxNodeName = tri_obj_.NodeName();
-  auto name = _convertMaxName(maxNodeName);
-
-  const auto nVerts = mesh.getNumVerts();
-
-  _immediate_mesh::vertex_list vertices(nVerts);
-
-  std::vector<Point3> positions(nVerts); // We need it to calculate normal
-  for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
-       ++iVertex) {
-    positions[iVertex] = _convertIntoGlTFAxisSystem(mesh.getVert(iVertex));
-  }
-
-  auto normals = compute_normals(mesh, positions.data());
-
-  auto positionChannel = reinterpret_cast<glTF::accessor::component_storage_t<
-      glTF::accessor::component_type::the_float> *>(
-      vertices.add_channel(glTF::standard_semantics::position,
-                           glTF::accessor::type_type::vec3,
-                           glTF::accessor::component_type::the_float));
-  auto normalChannel = reinterpret_cast<glTF::accessor::component_storage_t<
-      glTF::accessor::component_type::the_float> *>(
-      vertices.add_channel(glTF::standard_semantics::normal,
-                           glTF::accessor::type_type::vec3,
-                           glTF::accessor::component_type::the_float));
-  for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
-       ++iVertex) {
-    _convert(positions[iVertex], positionChannel + 3 * iVertex);
-    _convert(normals[iVertex], normalChannel + 3 * iVertex);
-  }
-
-  auto mtl = max_node_.GetMtl();
-
-  const auto nFaces = mesh.getNumFaces();
-  std::unordered_map<MtlID, _immediate_mesh::submesh> submeshes;
-  /*std::vector<_immediate_mesh::vertex_list::vertex_count_type> indices(3 *
-                                                                       nFaces);*/
-  for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
-       ++iFace) {
-    auto mtlIndex = mesh.getFaceMtlIndex(iFace);
-    auto submesh = submeshes.try_emplace(mtlIndex);
-    if (submesh.second) {
-      submesh.first->second.material_id = mtlIndex;
-      submesh.first->second.indices.reserve(3 * nFaces);
-    }
-    auto &indices = submesh.first->second.indices;
-
-    auto &face = mesh.faces[iFace];
-    for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
-      auto iVertex = face.getVert(iFaceVert);
-      indices.push_back(iVertex);
-      // indices[3 * iFace + iFaceVert] = iVertex;
-    }
-  }
-
-  const auto nMaps = mesh.getNumMaps();
-  // https://help.autodesk.com/view/3DSMAX/2015/ENU/?guid=__cpp_ref_idx__r_list_of_mapping_channel_index_values_html_html
-  // > The mesh mapping channel may be specified as one of the following:
-  // >   0: Vertex Color channel.
-  // >   1: Default mapping channel(the TVert array).
-  // >   2 through MAX_MESHMAPS - 1 : The new mapping channels available in
-  // release 3.0.
-  for (std::remove_const_t<decltype(nMaps)> iMap = 1; iMap < nMaps; ++iMap) {
-    auto mapFaces = mesh.mapFaces(iMap);
-    if (!mapFaces) {
-      continue;
-    }
-    auto set = iMap - 1;
-    auto texcoordChannel = reinterpret_cast<glTF::accessor::component_storage_t<
-        glTF::accessor::component_type::the_float> *>(
-        vertices.add_channel(glTF::standard_semantics::texcoord(set),
-                             glTF::accessor::type_type::vec2,
-                             glTF::accessor::component_type::the_float));
-    for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
-         ++iFace) {
-      auto &mapFace = mapFaces[iFace];
-      auto &face = mesh.faces[iFace];
-      auto faceMtl = !mtl ? nullptr
-                          : (mtl->NumSubMtls() == 0
-                                 ? mtl
-                                 : mtl->GetSubMtl(mesh.getFaceMtlIndex(iFace)));
-      for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
-        auto iTVertex = mapFace.getTVert(iFaceVert);
-        auto iVertex = face.getVert(iFaceVert);
-        auto uvw = mesh.getTVert(iTVertex);
-
-        /*if (faceMtl) {
-          auto nSubTexmaps = faceMtl->NumSubTexmaps();
-          for (decltype(nSubTexmaps) iSubTexmap = 0; iSubTexmap < nSubTexmaps;
-               ++iSubTexmap) {
-            auto texmap = faceMtl->GetSubTexmap(iSubTexmap);
-            Matrix3 uvmatrix(TRUE);
-            texmap->GetUVTransform(uvmatrix);
-            auto uvgen = texmap->GetTheUVGen();
-
-          }
-        }*/
-
-        auto pOut = texcoordChannel + 2 * iVertex;
-        pOut[0] = uvw.x;
-        pOut[1] = 1.0 - uvw.y;
-      }
-    }
-  }
-
-  if (mesh.getNumTVerts() != 0) {
-    // uv0 channel
-    /*auto texcoordChannel =
-    reinterpret_cast<glTF::accessor::component_storage_t<
-        glTF::accessor::component_type::the_float> *>(
-        vertices.add_channel(glTF::standard_semantics::texcoord(0),
-                             glTF::accessor::type_type::vec2,
-                             glTF::accessor::component_type::the_float));
-    for (std::remove_const_t<decltype(nFaces)> iFace = 0; iFace < nFaces;
-         ++iFace) {
-      auto &tface = mesh.tvFace[iFace];
-      for (auto iFaceVert = 0; iFaceVert < 3; ++iFaceVert) {
-        auto iTVertex = tface.getTVert(iFaceVert);
-        auto &uvw = mesh.getTVert(iTVertex);
-        auto iOutputVertex = iFace * 3 + iFaceVert;
-        auto pOut = texcoordChannel + 2 * iOutputVertex;
-        pOut[0] = uvw.x;
-        pOut[1] = uvw.y;
-      }
-    }*/
-  }
-
-  for (std::remove_const_t<decltype(nMaps)> iMap = 0; iMap < nMaps; ++iMap) {
-  }
-
-  std::vector<_immediate_mesh::submesh> submeshesArray(submeshes.size());
-  std::transform(submeshes.begin(), submeshes.end(), submeshesArray.begin(),
-                 [](auto &kv) { return std::move(kv.second); });
-
-  return {name, std::move(vertices), std::move(submeshesArray)};
-}
-
 glTF::object_ptr<glTF::mesh> exporter_visitor::_convertMesh(
     const _immediate_mesh &imm_mesh_,
     const std::vector<glTF::object_ptr<glTF::material>> &materials_) {
-  auto &vertices = imm_mesh_.vertices;
-
-  std::vector<
-      std::pair<const std::u8string_view, glTF::object_ptr<glTF::accessor>>>
-      attributes;
-  attributes.reserve(vertices.channels_size());
-  for (auto iChannel = vertices.channels_begin();
-       iChannel != vertices.channels_end(); ++iChannel) {
-    auto accessor =
-        _makeSimpleAccessor(iChannel->second.type, iChannel->second.component,
-                            vertices.vertex_count());
-    std::copy_n(iChannel->second.data.get(),
-                iChannel->second.attribute_bytes() * vertices.vertex_count(),
-                accessor->data());
-    accessor->name(iChannel->first);
-    if (iChannel->first == glTF::standard_semantics::position) {
-      accessor->explicit_bound_required(true);
-    }
-    attributes.emplace_back(iChannel->first, accessor);
-  }
-
   auto glTFMesh = _document.factory().make<glTF::mesh>();
   glTFMesh->name(imm_mesh_.name);
 
   for (auto &submesh : imm_mesh_.submeshes) {
+    auto &vertices = submesh.vertices;
+
     glTF::primitive primitive{glTF::primitive::mode_type::triangles};
-    for (auto &attribute : attributes) {
-      primitive.emplace_attribute(attribute.first, attribute.second);
+
+    for (auto iChannel = vertices.channels_begin();
+         iChannel != vertices.channels_end(); ++iChannel) {
+      auto accessor =
+          _makeSimpleAccessor(iChannel->second.type, iChannel->second.component,
+                              vertices.vertex_count());
+      std::copy_n(iChannel->second.data.get(),
+                  iChannel->second.attribute_bytes() * vertices.vertex_count(),
+                  accessor->data());
+      accessor->name(iChannel->first);
+      if (iChannel->first == glTF::standard_semantics::position) {
+        accessor->explicit_bound_required(true);
+      }
+      primitive.emplace_attribute(iChannel->first, accessor);
     }
 
-    auto indicesAccessor = _addIndices(gsl::make_span(submesh.indices));
-    primitive.indices(indicesAccessor);
+    if (submesh.indices) {
+      auto indicesAccessor = _addIndices(gsl::make_span(*submesh.indices));
+      primitive.indices(indicesAccessor);
+    }
 
     if (submesh.material_id < materials_.size()) {
       primitive.material(materials_[submesh.material_id]);
@@ -435,11 +210,148 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
   // >   2 through MAX_MESHMAPS - 1 : The new mapping channels available in
   // release 3.0.
 
+  using PositionChannelComponent = glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::the_float>;
+  using NormalChannelComponent = PositionChannelComponent;
+  using TexcoordChannelComponent = PositionChannelComponent;
+
   if (!igame_mesh_.InitializeData()) {
     // TODO: warn
     return std::nullopt;
   }
 
+  auto name = _convertMaxName(igame_mesh_.GetClassName());
+
+  auto mapNums = igame_mesh_.GetActiveMapChannelNum();
+  auto nMapNums = mapNums.Count();
+
+  auto objectOffsetTransform = _getObjectOffsetTransformMatrix(igame_node_, 0);
+
+  struct ChannelList {
+    PositionChannelComponent *potition;
+    NormalChannelComponent *normal;
+    std::unique_ptr<TexcoordChannelComponent *[]> texcoords;
+  };
+
+  auto addChannels = [&](_immediate_mesh::vertex_list &vertices_) {
+    auto positionChannel =
+        reinterpret_cast<PositionChannelComponent *>(vertices_.add_channel(
+            glTF::standard_semantics::position, glTF::accessor::type_type::vec3,
+            glTF::accessor::component_type::the_float));
+    auto normalChannel =
+        reinterpret_cast<NormalChannelComponent *>(vertices_.add_channel(
+            glTF::standard_semantics::normal, glTF::accessor::type_type::vec3,
+            glTF::accessor::component_type::the_float));
+    auto texcoordChannels =
+        std::make_unique<TexcoordChannelComponent *[]>(nMapNums);
+    for (decltype(nMapNums) iMapNum = 0; iMapNum < nMapNums; ++iMapNum) {
+      auto iMap = mapNums[iMapNum];
+      auto set = iMap - 1;
+      texcoordChannels[iMapNum] = reinterpret_cast<TexcoordChannelComponent *>(
+          vertices_.add_channel(glTF::standard_semantics::texcoord(set),
+                                glTF::accessor::type_type::vec2,
+                                glTF::accessor::component_type::the_float));
+    }
+
+    return ChannelList{positionChannel, normalChannel,
+                       std::move(texcoordChannels)};
+  };
+
+  auto addFace = [&](ChannelList &channels_, FaceEx &face_, int face_index_) {
+    for (int iFaceCorner = 0; iFaceCorner < 3; ++iFaceCorner) {
+      auto outputVertexIndex = 3 * face_index_ + iFaceCorner;
+
+      auto iVertex = face_.vert[iFaceCorner];
+      auto vertex = igame_mesh_.GetVertex(iVertex, true);
+      auto objectOffsetAppliedVertex =
+          _transformPoint(objectOffsetTransform, vertex);
+      _convert(objectOffsetAppliedVertex,
+               channels_.potition + 3 * outputVertexIndex);
+
+      auto iNormal = face_.norm[iFaceCorner];
+      auto normal = igame_mesh_.GetNormal(iNormal, true);
+      auto objectOffsetAppliedNormal =
+          _transformVector(objectOffsetTransform, vertex).Normalize();
+      _convert(objectOffsetAppliedNormal,
+               channels_.normal + 3 * outputVertexIndex);
+
+      for (decltype(nMapNums) iMapNum = 0; iMapNum < nMapNums; ++iMapNum) {
+        auto iMap = mapNums[iMapNum];
+
+        DWORD mapFaceIndex[3];
+        bool success = igame_mesh_.GetMapFaceIndex(iMap, face_.meshFaceIndex,
+                                                   mapFaceIndex);
+        assert(success);
+
+        Point3 uvw;
+        success =
+            igame_mesh_.GetMapVertex(iMap, mapFaceIndex[iFaceCorner], uvw);
+        assert(success);
+
+        auto outputUV = channels_.texcoords[iMapNum] + 2 * outputVertexIndex;
+        outputUV[0] = uvw.x;
+        outputUV[1] = 1 - uvw.y;
+      }
+    }
+  };
+
+  std::vector<_immediate_mesh::submesh> submeshes;
+  decltype(igame_node_.GetNodeMaterial()->GetSubMaterialCount()) nSubMaterials =
+      0;
+  if (auto material = igame_node_.GetNodeMaterial()) {
+    nSubMaterials = material->GetSubMaterialCount();
+  }
+
+  if (nSubMaterials == 0) {
+    auto faceCount = igame_mesh_.GetNumberOfFaces();
+
+    _immediate_mesh::vertex_list vertices(3 * faceCount);
+    auto channels = addChannels(vertices);
+
+    for (decltype(faceCount) iFace = 0; iFace < faceCount; ++iFace) {
+      auto face = igame_mesh_.GetFace(iFace);
+      addFace(channels, *face, iFace);
+    }
+
+    submeshes.emplace_back(_immediate_mesh::submesh{std::move(vertices)});
+  } else { // It's multi-material.
+    for (decltype(nSubMaterials) iSubMaterial = 0; iSubMaterial < nSubMaterials;
+         ++iSubMaterial) {
+      auto materialId = static_cast<MtlID>(iSubMaterial);
+
+      auto materialFaces = igame_mesh_.GetFacesFromMatID(iSubMaterial);
+      auto materialFaceCount = materialFaces.Count();
+
+      _immediate_mesh::vertex_list vertices(3 * materialFaceCount);
+      auto channels = addChannels(vertices);
+
+      for (decltype(materialFaceCount) iMaterialFacesTab = 0;
+           iMaterialFacesTab < materialFaceCount; ++iMaterialFacesTab) {
+        auto materialFace = materialFaces[iMaterialFacesTab];
+        addFace(channels, *materialFace, iMaterialFacesTab);
+      }
+
+      submeshes.emplace_back(
+          _immediate_mesh::submesh{materialId, std::move(vertices)});
+    }
+  }
+
+  return _immediate_mesh{std::move(name), std::move(submeshes)};
+}
+
+std::optional<exporter_visitor::_immediate_mesh>
+exporter_visitor::_exportMeshIndexed(IGameNode &igame_node_,
+                                     IGameMesh &igame_mesh_) {
+  if (!igame_mesh_.InitializeData()) {
+    // TODO: warn
+    return std::nullopt;
+  }
+
+  auto name = _convertMaxName(igame_mesh_.GetClassName());
+
+#if true
+  return _immediate_mesh{std::move(name), {}};
+#else
   auto nFaces = igame_mesh_.GetNumberOfFaces();
   auto mapNums = igame_mesh_.GetActiveMapChannelNum();
   auto nVertexAttribs = mapNums.Count() + 1;
@@ -685,15 +597,16 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
   {
     auto resortedVertices = vertexResort;
     std::sort(resortedVertices.begin(), resortedVertices.end());
-    auto rReduant = std::unique(resortedVertices.begin(), resortedVertices.end());
+    auto rReduant =
+        std::unique(resortedVertices.begin(), resortedVertices.end());
     if (rReduant != resortedVertices.end()) {
       assert(false);
     }
   }
 #endif
 
-  auto name = _convertMaxName(igame_mesh_.GetClassName());
   return _immediate_mesh{name, std::move(vertices), std::move(submeshes),
                          std::move(vertexResort)};
+#endif
 }
 } // namespace fant

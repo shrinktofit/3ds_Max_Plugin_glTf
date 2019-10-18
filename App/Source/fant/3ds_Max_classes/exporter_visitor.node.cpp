@@ -2,21 +2,6 @@
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
 namespace fant {
-int exporter_visitor::_constructSceneGraphProc(INode *max_node_) {
-  auto glTFNode = _convertNode(*max_node_);
-  if (!max_node_->IsRootNode()) {
-    auto parentMaxNode = max_node_->GetParentNode();
-    auto rParentGlTfNode = _nodeMaps.find(parentMaxNode);
-    if (rParentGlTfNode != _nodeMaps.end()) {
-      rParentGlTfNode->second->add_child(glTFNode);
-    } else {
-      _glTFScene->add_node(glTFNode);
-    }
-  }
-  _nodeMaps.emplace(max_node_, glTFNode);
-  return TREE_CONTINUE;
-}
-
 void exporter_visitor::_setTrs(glTF::node &node_,
                                const Point3 &t_,
                                const Quat &r_,
