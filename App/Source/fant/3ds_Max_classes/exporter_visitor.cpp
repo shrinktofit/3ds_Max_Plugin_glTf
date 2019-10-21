@@ -21,8 +21,8 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
   auto fps = 30;
   if (animRange.Duration()) {
     auto step = SecToTicks((1 / float(30)));
-    auto nFrame =
-        static_cast<glTF::integer>(std::ceil(animRange.Duration() / step));
+    auto nFrame = static_cast<glTF::accessor::size_type>(
+        std::ceil(animRange.Duration() / step));
     auto inputAccessor =
         _makeSimpleAccessor(glTF::accessor::type_type::scalar,
                             glTF::accessor::component_type::the_float, nFrame);
@@ -67,6 +67,15 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     _glTFScene->add_node(glTFRootNode);
   }
 
+  /*auto nRootMaterials = igameScene->GetRootMaterialCount();
+  std::vector<std::vector<glTF::object_ptr<glTF::material>>> glTFRootMaterials(
+      nRootMaterials);
+  for (decltype(nRootMaterials) iRootMaterial = 0;
+       iRootMaterial < nRootMaterials; ++iRootMaterial) {
+    auto rootMaterial = igameScene->GetRootMaterial(iRootMaterial);
+    glTFRootMaterials[iRootMaterial] = _exportMaterial(*rootMaterial);
+  }*/
+
   for (auto &nodeMap : _nodeMaps2) {
     auto &igameNode = *nodeMap.first;
     auto &glTFNode = nodeMap.second;
@@ -74,12 +83,13 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
     switch (object->GetIGameType()) {
     case IGameObject::ObjectTypes::IGAME_MESH: {
       auto &igameMesh = static_cast<IGameMesh &>(*object);
-      if (auto immMesh = _exportMesh(igameNode, igameMesh)) {
-        glTF::object_ptr<glTF::skin> glTFSkin;
-        if (igameMesh.IsObjectSkinned()) {
-          /*glTFSkin =
-              _exportSkin(igameNode, *igameMesh.GetIGameSkin(), *immMesh);*/
-        }
+      glTF::object_ptr<glTF::skin> glTFSkin;
+      std::optional<_vertex_skin_data> vertexSkinData;
+      if (igameMesh.IsObjectSkinned()) {
+        std::tie(glTFSkin, vertexSkinData) =
+            _exportSkin(igameNode, *igameMesh.GetIGameSkin());
+      }
+      if (auto immMesh = _exportMesh(igameNode, igameMesh, vertexSkinData)) {
         auto glTFMaterials = _tryExportMaterial(*igameNode.GetMaxNode());
         auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
         glTFNode->mesh(glTFMesh);
@@ -147,6 +157,16 @@ Quat exporter_visitor::_convertIntoGlTFAxisSystem(const Quat &max_rotation_) {
   Quat q;
   q.Set(AngAxis(glAxis, glAngle));
   return q;
+}
+
+/// <summary>
+/// <c>quat_</c> shall be normalized.
+/// </summary>
+Quat exporter_visitor::_igameToGlTF(const Quat &quat_) {
+  // glTF use right-hand rule, iGame(Max) use left-hand.
+  Quat result(quat_);
+  result.w = -result.w;
+  return result;
 }
 
 std::u8string exporter_visitor::_convertMaxName(const MSTR &max_name_) {

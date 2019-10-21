@@ -56,7 +56,7 @@ using glTF_json = nlohmann::json;
 
 using number = float;
 
-using integer = std::uint32_t;
+using integer = std::uint64_t;
 
 class document;
 
@@ -193,8 +193,7 @@ public:
 
 private:
   using _buffer_type = std::vector<std::byte>;
-  std::uint32_t _index;
-  std::uint32_t _length = 0;
+  size_type _length = 0;
   std::list<_buffer_type> _buffers;
   std::optional<std::u8string> _uri;
 };
@@ -205,8 +204,8 @@ public:
 
   struct allocate_result {
     allocate_result(object_ptr<glTF::buffer> buffer_,
-                    integer size_,
-                    integer alignment_)
+                    size_type size_,
+                    size_type alignment_)
         : buffer(buffer_), size(size_) {
       auto [d, s] = buffer_->allocate(size, alignment_);
       data = d;
@@ -215,8 +214,8 @@ public:
 
     object_ptr<glTF::buffer> buffer;
     std::byte *data;
-    integer offset;
-    integer size;
+    size_type offset;
+    size_type size;
   };
 
   enum class target_type {
@@ -229,8 +228,8 @@ public:
   }
 
   buffer_view(object_ptr<glTF::buffer> buffer_,
-              integer size_,
-              integer alignment_)
+              size_type size_,
+              size_type alignment_)
       : buffer_view(allocate_result(buffer_, size_, alignment_)) {
   }
 
@@ -242,15 +241,15 @@ public:
     _target = target_;
   }
 
-  integer stride() const {
+  size_type stride() const {
     return _byteStride.value_or(0);
   }
 
-  void stride(integer stride_) {
+  void stride(size_type stride_) {
     _byteStride = stride_;
   }
 
-  integer offset() const {
+  size_type offset() const {
     return _allocateResult.offset;
   }
 
@@ -258,7 +257,7 @@ public:
 
 private:
   allocate_result _allocateResult;
-  std::optional<integer> _byteStride;
+  std::optional<size_type> _byteStride;
   std::optional<target_type> _target;
 };
 
@@ -380,7 +379,7 @@ public:
     return _type;
   }
 
-  integer count() const {
+  size_type count() const {
     return _count;
   }
 
@@ -417,7 +416,7 @@ private:
   size_type _byteOffset;
   component_type _componentType;
   type_type _type;
-  integer _count;
+  size_type _count;
   bool _normalized = false;
   bool _minMaxRequired;
 };

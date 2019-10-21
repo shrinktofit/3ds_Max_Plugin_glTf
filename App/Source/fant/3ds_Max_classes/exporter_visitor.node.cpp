@@ -17,7 +17,8 @@ void exporter_visitor::_setTrs(glTF::node &node_,
   if (!r_.IsIdentity()) {
     auto normr = Quat(r_);
     normr.Normalize();
-    node_.set_rotation(normr.x, normr.y, normr.z, normr.w);
+    normr = _igameToGlTF(normr);
+    node_.set_rotation(normr.x, normr.y, normr.z, -normr.w);
   }
 }
 

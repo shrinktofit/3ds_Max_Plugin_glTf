@@ -62,13 +62,9 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
   auto glTFTexture = _document.factory().make<glTF::texture>();
   glTFTexture->name(_convertMaxName(tex_map_.GetName()));
 
-  if (tex_map_.ClassID() == Class_ID(BMTEX_CLASS_ID, 0)) {
-    auto &bmt = reinterpret_cast<BitmapTex &>(tex_map_);
-    auto &bitmap = *bmt.GetBitmap(0);
-    auto bitmapInfo = bitmap.GetBitmapInfo();
-
+  auto readBitmap = [&](Bitmap &bitmap_) {
     auto glTFImage = _document.factory().make<glTF::image>();
-
+    auto bitmapInfo = bitmap_.GetBitmapInfo();
     if (false) {
       namespace fs = std::filesystem;
       auto tmpDir = fs::path("X:\\Temp");
@@ -83,7 +79,7 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
       exportBitmapInfo.SetEndFrame(0);*/
       //  exportBitmapInfo.SetName(tmpDir.wstring().c_str());
       auto exportBitmap = TheManager->Create(&exportBitmapInfo);
-      exportBitmap->CopyImage(&bitmap, COPY_IMAGE_RESIZE_HI_QUALITY, 0);
+      exportBitmap->CopyImage(&bitmap_, COPY_IMAGE_RESIZE_HI_QUALITY, 0);
       auto res = exportBitmap->OpenOutput(&exportBitmapInfo);
       processSaveBitmapRes(res);
       res = exportBitmap->Write(&exportBitmapInfo);
@@ -93,18 +89,20 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
       exportBitmap->DeleteThis();
       auto imageFileBuffer = read_binary_file(tmpImgFile);
       auto bufferView = _document.factory().make<glTF::buffer_view>(
-          _mainBuffer, imageFileBuffer.size(), 0);
+        _mainBuffer, imageFileBuffer.size(), 0);
       std::copy_n(imageFileBuffer.data(), imageFileBuffer.size(),
-                  bufferView->data());
+        bufferView->data());
       glTFImage->source(bufferView, glTF::image::allowed_mime_type::png);
-    } else {
+    }
+    else {
       if (auto fullPathMax = bitmapInfo.Name()) {
         auto fullPath = _convertMaxPath(fullPathMax);
         if (auto mimeType =
-                deduce_mime_type_from_extension(fullPath.extension());
-            !mimeType) {
+          deduce_mime_type_from_extension(fullPath.extension());
+          !mimeType) {
           // TO DO error
-        } else {
+        }
+        else {
           auto imageFileBuffer = read_binary_file(fullPath);
 
           /*auto bufferView = _document.factory().make<glTF::buffer_view>(
@@ -122,6 +120,21 @@ exporter_visitor::_tryConvertTexture(Texmap &tex_map_) {
     }
 
     glTFTexture->source(glTFImage);
+    return glTFImage;
+  };
+
+  if (tex_map_.ClassID() == Class_ID(BMTEX_CLASS_ID, 0)) {
+    auto &bmt = reinterpret_cast<BitmapTex &>(tex_map_);
+    auto uvgen = bmt.GetUVGen();
+    if (uvgen) { // TODO, can it be nullptr?
+      auto uTile = uvgen->GetUScl(0);
+      auto vTile = uvgen->GetVScl(0);
+    }
+    auto bitmap = bmt.GetBitmap(0);
+    if (bitmap) { // It may be unspecified.
+      auto glTFImage = readBitmap(*bitmap);
+      glTFTexture->source(glTFImage);
+    }
   }
 
   _textureMap.emplace(&tex_map_, glTFTexture);

@@ -31,24 +31,6 @@ exporter_visitor::_tryConvertMaterial(Mtl &max_mtl_) {
 
 glTF::object_ptr<glTF::material>
 exporter_visitor::_convertStdMaterial(StdMat &max_mtl_) {
-  /*
-  two = std->GetTwoSided();
-
-     // Access the Diffuse map and see if it's a Bitmap texture
-     Texmap *tmap = m->GetSubTexmap( ID_DI);
-     if (tmap->ClassID() == Class_ID(BMTEX_CLASS_ID, 0))
-     {
-      // It is -- Access the UV tiling settings at time 0.
-       BitmapTex *bmt = (BitmapTex*) tmap;
-       StdUVGen *uv = bmt->GetUVGen();
-      utile = uv->GetUScl(0);
-      vtile = uv->GetVScl(0);
-      buf.printf(_T("Two sided=%d, U Tile = %.1f, V Tile = %.1f"),
-      two, utile, vtile);
-      MessageBox(ip->GetMAXHWnd(), buf, _T("Info..."),
-      MB_ICONINFORMATION);
-     }
-  */
   auto glTFMaterial = _document.factory().make<glTF::material>();
   glTFMaterial->name(_convertMaxName(max_mtl_.GetName()));
 
@@ -87,9 +69,29 @@ exporter_visitor::_convertMultiMaterial(MultiMtl &max_mtl_) {
     if (converted.size() == 1) {
       submaterials[iSubMtl] = converted.front();
     } else if (!converted.empty()) {
-      // TODO warn: submaterial of multimat shall not be multimat anymore.
+      throw std::runtime_error("Submaterial should not be multi-material.");
     }
   }
   return submaterials;
+}
+
+std::vector<glTF::object_ptr<glTF::material>>
+exporter_visitor::_exportMaterial(IGameMaterial &igame_materail_) {
+  if (igame_materail_.IsMultiType()) {
+    auto nSubMaterials = igame_materail_.GetSubMaterialCount();
+    std::vector<glTF::object_ptr<glTF::material>> subGlTFMaterials(
+        nSubMaterials);
+    for (decltype(nSubMaterials) iSubMaterial = 0; iSubMaterial < nSubMaterials;
+         ++iSubMaterial) {
+      auto subMaterial = igame_materail_.GetSubMaterial(iSubMaterial);
+      auto subGlTFMaterial = _exportMaterial(*subMaterial);
+      if (subGlTFMaterial.size() != 1) {
+        throw std::runtime_error("Submaterial should not be multi-material.");
+      }
+      subGlTFMaterials[iSubMaterial] = subGlTFMaterial.front();
+    }
+  } else {
+    return _tryConvertMaterial(*igame_materail_.GetMaxMaterial());
+  }
 }
 } // namespace fant

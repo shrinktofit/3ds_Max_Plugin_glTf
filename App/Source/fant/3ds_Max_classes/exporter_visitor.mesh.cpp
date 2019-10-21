@@ -199,8 +199,10 @@ glTF::object_ptr<glTF::accessor> exporter_visitor::_addIndices(
   return accessor;
 }
 
-std::optional<exporter_visitor::_immediate_mesh>
-exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
+std::optional<exporter_visitor::_immediate_mesh> exporter_visitor::_exportMesh(
+    IGameNode &igame_node_,
+    IGameMesh &igame_mesh_,
+    const std::optional<_vertex_skin_data> &skin_data_) {
   // https://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2019/ENU/3DSMax-MAXScript/files/GUID-CBBA20AD-F7D5-46BC-9F5E-5EDA109F9CF4-htm.html
   // https://forums.autodesk.com/t5/3ds-max-programming/weird-igamemesh-problem/td-p/6275934
   // https://help.autodesk.com/view/3DSMAX/2015/ENU/?guid=__cpp_ref_idx__r_list_of_mapping_channel_index_values_html_html
@@ -213,7 +215,11 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
   using PositionChannelComponent = glTF::accessor::component_storage_t<
       glTF::accessor::component_type::the_float>;
   using NormalChannelComponent = PositionChannelComponent;
+  using ColorChannelComponent = PositionChannelComponent;
   using TexcoordChannelComponent = PositionChannelComponent;
+  using JointChannelComponent = glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::unsigned_int>;
+  using WeightChannelComponent = NormalChannelComponent;
 
   if (!igame_mesh_.InitializeData()) {
     // TODO: warn
@@ -230,7 +236,9 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
   struct ChannelList {
     PositionChannelComponent *potition;
     NormalChannelComponent *normal;
+    ColorChannelComponent *color; // Optional
     std::unique_ptr<TexcoordChannelComponent *[]> texcoords;
+    std::unique_ptr<std::pair<std::byte *, std::byte *>[]> jws;
   };
 
   auto addChannels = [&](_immediate_mesh::vertex_list &vertices_) {
@@ -244,17 +252,38 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
             glTF::accessor::component_type::the_float));
     auto texcoordChannels =
         std::make_unique<TexcoordChannelComponent *[]>(nMapNums);
+    ColorChannelComponent *colorChannel = nullptr;
     for (decltype(nMapNums) iMapNum = 0; iMapNum < nMapNums; ++iMapNum) {
       auto iMap = mapNums[iMapNum];
-      auto set = iMap - 1;
-      texcoordChannels[iMapNum] = reinterpret_cast<TexcoordChannelComponent *>(
-          vertices_.add_channel(glTF::standard_semantics::texcoord(set),
-                                glTF::accessor::type_type::vec2,
-                                glTF::accessor::component_type::the_float));
+      if (iMap == 0) {
+        colorChannel = reinterpret_cast<TexcoordChannelComponent *>(
+            vertices_.add_channel(glTF::standard_semantics::color(0),
+                                  glTF::accessor::type_type::vec3,
+                                  glTF::accessor::component_type::the_float));
+      } else {
+        texcoordChannels[iMapNum] =
+            reinterpret_cast<TexcoordChannelComponent *>(vertices_.add_channel(
+                glTF::standard_semantics::texcoord(iMap - 1),
+                glTF::accessor::type_type::vec2,
+                glTF::accessor::component_type::the_float));
+      }
     }
-
-    return ChannelList{positionChannel, normalChannel,
-                       std::move(texcoordChannels)};
+    decltype(ChannelList::jws) jwChannels;
+    if (skin_data_) {
+      auto nJWSets = skin_data_->sets.size();
+      jwChannels =
+          std::make_unique<decltype(jwChannels)::element_type[]>(nJWSets);
+      for (decltype(nJWSets) iJWSet = 0; iJWSet < nJWSets; ++iJWSet) {
+        jwChannels[iJWSet].first = vertices_.add_channel(
+            glTF::standard_semantics::joints(iJWSet),
+            glTF::accessor::type_type::vec4, skin_data_->joint_storage);
+        jwChannels[iJWSet].second = vertices_.add_channel(
+            glTF::standard_semantics::weights(iJWSet),
+            glTF::accessor::type_type::vec4, skin_data_->weight_storage);
+      }
+    }
+    return ChannelList{positionChannel, normalChannel, colorChannel,
+                       std::move(texcoordChannels), std::move(jwChannels)};
   };
 
   auto addFace = [&](ChannelList &channels_, FaceEx &face_, int face_index_) {
@@ -288,9 +317,33 @@ exporter_visitor::_exportMesh(IGameNode &igame_node_, IGameMesh &igame_mesh_) {
             igame_mesh_.GetMapVertex(iMap, mapFaceIndex[iFaceCorner], uvw);
         assert(success);
 
-        auto outputUV = channels_.texcoords[iMapNum] + 2 * outputVertexIndex;
-        outputUV[0] = uvw.x;
-        outputUV[1] = 1 - uvw.y;
+        if (iMap == 0) {
+          auto pOutputColor = channels_.color + 3 * outputVertexIndex;
+          pOutputColor[0] = uvw.x;
+          pOutputColor[1] = uvw.y;
+          pOutputColor[2] = uvw.z;
+        } else {
+          auto outputUV = channels_.texcoords[iMapNum] + 2 * outputVertexIndex;
+          outputUV[0] = uvw.x;
+          outputUV[1] = 1 - uvw.y;
+        }
+      }
+
+      if (skin_data_) {
+        auto &jwsets = skin_data_->sets;
+        auto jointBytes =
+            glTF::accessor::required_bytes(skin_data_->joint_storage) * 4;
+        auto weightBytes =
+            glTF::accessor::required_bytes(skin_data_->weight_storage) * 4;
+        for (decltype(jwsets.size()) iJWSet = 0; iJWSet < jwsets.size();
+             ++iJWSet) {
+          auto &jwset = jwsets[iJWSet];
+          auto [jointChannel, weightChannel] = channels_.jws[iJWSet];
+          std::copy_n(&jwset.joints[jointBytes * iVertex], jointBytes,
+                      &jointChannel[jointBytes * outputVertexIndex]);
+          std::copy_n(&jwset.weights[weightBytes * iVertex], weightBytes,
+                      &weightChannel[weightBytes * outputVertexIndex]);
+        }
       }
     }
   };

@@ -68,7 +68,7 @@ private:
       vertex_list &operator=(const vertex_list &) = delete;
       vertex_list(const vertex_list &) = delete;
 
-      using vertex_count_type = glTF::integer;
+      using vertex_count_type = glTF::buffer::size_type;
 
       struct channel_type {
         const glTF::accessor::type_type type;
@@ -166,6 +166,17 @@ private:
     }
   };
 
+  struct _vertex_skin_data {
+    struct jw_channel {
+      std::unique_ptr<std::byte[]> joints;
+      std::unique_ptr<std::byte[]> weights;
+    };
+
+    glTF::accessor::component_type joint_storage;
+    glTF::accessor::component_type weight_storage;
+    std::vector<jw_channel> sets;
+  };
+
   glTF::object_ptr<glTF::node> _convertNode(INode &max_node_);
 
   glTF::object_ptr<glTF::node> _exportNode(IGameNode &igame_node_);
@@ -173,8 +184,10 @@ private:
   glTF::object_ptr<glTF::node>
   _trySimulateObjectOffsetTransform(INode &max_node_);
 
-  std::optional<_immediate_mesh> _exportMesh(IGameNode &igame_node_,
-                                             IGameMesh &igame_mesh_);
+  std::optional<_immediate_mesh>
+  _exportMesh(IGameNode &igame_node_,
+              IGameMesh &igame_mesh_,
+              const std::optional<_vertex_skin_data> &skin_data_);
 
   std::optional<_immediate_mesh> _exportMeshIndexed(IGameNode &igame_node_,
                                                     IGameMesh &igame_mesh_);
@@ -183,9 +196,11 @@ private:
   _convertMesh(const _immediate_mesh &imm_mesh_,
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
-  glTF::object_ptr<glTF::skin> _exportSkin(IGameNode &igame_node_,
-                                           IGameSkin &igame_skin_,
-                                           _immediate_mesh &imm_mesh_);
+  std::pair<glTF::object_ptr<glTF::skin>, _vertex_skin_data>
+  _exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_);
+
+  std::vector<glTF::object_ptr<glTF::material>>
+  _exportMaterial(IGameMaterial &igame_materail_);
 
   std::vector<glTF::object_ptr<glTF::material>>
   _tryExportMaterial(INode &max_node_);
@@ -199,13 +214,6 @@ private:
   _convertMultiMaterial(MultiMtl &max_mtl_);
 
   std::optional<glTF::texture_info> _tryConvertTexture(Texmap &tex_map_);
-
-  void _bakeAnimation(INode &max_node_,
-                      TimeValue start_time_,
-                      TimeValue step_,
-                      TimeValue frame_count_,
-                      glTF::object_ptr<glTF::node> glTF_node_,
-                      glTF::object_ptr<glTF::accessor> input_);
 
   void _bakeAnimation(IGameNode &igame_node_,
                       TimeValue start_time_,
@@ -294,6 +302,11 @@ private:
 
   static Quat _convertIntoGlTFAxisSystem(const Quat &max_point_);
 
+  /// <summary>
+  /// <c>quat_</c> shall be normalized.
+  /// </summary>
+  static Quat _igameToGlTF(const Quat &quat_);
+
   static std::u8string _convertMaxName(const MSTR &max_name_);
 
   static std::filesystem::path _convertMaxPath(const MSTR &max_path_);
@@ -357,7 +370,7 @@ private:
   glTF::object_ptr<glTF::accessor>
   _makeSimpleAccessor(glTF::accessor::type_type type_,
                       glTF::accessor::component_type comp_type_,
-                      glTF::integer count_) {
+                      glTF::accessor::size_type count_) {
     auto componentBytes = glTF::accessor::required_bytes(comp_type_);
     auto nBytes = glTF::accessor::required_bytes(comp_type_) *
                   glTF::accessor::required_components(type_) * count_;
@@ -376,11 +389,24 @@ private:
     return accessor;
   }
 
+  template <typename Ty> void _checkSpanSize(gsl::span<Ty> values_) {
+    if constexpr (std::numeric_limits<decltype(values_)::size_type>::max() >
+                  std::numeric_limits<glTF::accessor::size_type>::max()) {
+      if (values_.size() >
+          std::numeric_limits<glTF::accessor::size_type>::max()) {
+        throw std::overflow_error("Exceeds buffer capacity.");
+      }
+    }
+  }
+
   glTF::object_ptr<glTF::accessor>
   _makeSimpleAccessor(gsl::span<Point3> values_) {
+    _checkSpanSize(values_);
+
     auto accessor = _makeSimpleAccessor(
         glTF::accessor::type_type::vec3,
-        glTF::accessor::component_type::the_float, values_.size());
+        glTF::accessor::component_type::the_float,
+        static_cast<glTF::accessor::size_type>(values_.size()));
     _flatternVec3Array(
         values_,
         accessor->typed_data<glTF::accessor::component_type::the_float>());
@@ -389,9 +415,12 @@ private:
 
   glTF::object_ptr<glTF::accessor>
   _makeSimpleAccessor(gsl::span<Quat> values_) {
+    _checkSpanSize(values_);
+
     auto accessor = _makeSimpleAccessor(
         glTF::accessor::type_type::vec4,
-        glTF::accessor::component_type::the_float, values_.size());
+        glTF::accessor::component_type::the_float,
+        static_cast<glTF::accessor::size_type>(values_.size()));
     _flatternQuatArray(
         values_,
         accessor->typed_data<glTF::accessor::component_type::the_float>());
@@ -399,13 +428,13 @@ private:
   }
 
   static Matrix3 _getLocalNodeTransformMatrix(INode &max_node_,
-    TimeValue time_);
+                                              TimeValue time_);
 
   static GMatrix _getObjectOffsetTransformMatrix(IGameNode &igame_node_,
                                                  TimeValue time_);
 
   static Point3 _transformPoint(const GMatrix &matrix_, const Point3 &point_);
 
-  static Point3 _transformVector(const GMatrix& matrix_, const Point3& point_);
+  static Point3 _transformVector(const GMatrix &matrix_, const Point3 &point_);
 };
 } // namespace fant

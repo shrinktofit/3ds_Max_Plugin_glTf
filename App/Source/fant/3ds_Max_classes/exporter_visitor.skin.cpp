@@ -3,33 +3,50 @@
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
 namespace fant {
-glTF::object_ptr<glTF::skin>
-exporter_visitor::_exportSkin(IGameNode &igame_node_,
-                              IGameSkin &igame_skin_,
-                              _immediate_mesh &imm_mesh_) {
-  return nullptr;
-#if false
+std::pair<glTF::object_ptr<glTF::skin>, exporter_visitor::_vertex_skin_data>
+exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
+  // https://github.com/OGRECave/EasyOgreExporter/blob/master/source/ExSkeleton.cpp
+  // https://github.com/homer6/c_reading/blob/4dc6b608203bb0a053c703d80b6af5e1141983ab/cat_mother/maxexport/SgUtil.cpp
   auto glTFSkin = _document.factory().make<glTF::skin>();
 
+  // Bones that affecting vertices.
   auto nBones = igame_skin_.GetTotalBoneCount();
+
+  // Bones that assigned to the skin modifier.
+  auto nSkinBones = igame_skin_.GetTotalSkinBoneCount();
+
+  std::vector<std::string> boneNames(nBones);
+  for (std::remove_const_t<decltype(nBones)> iBone = 0; iBone < nBones;
+       ++iBone) {
+    auto boneNode = igame_skin_.GetIGameBone(iBone, true);
+    auto rglTFBoneNode = _nodeMaps2.find(boneNode);
+    if (rglTFBoneNode == _nodeMaps2.end()) {
+      throw std::runtime_error("Bone node is not in the scene graph.");
+    }
+    std::u8string_view name = rglTFBoneNode->second->name();
+    boneNames[iBone] = std::string(name.begin(), name.end());
+  }
   std::unordered_map<decltype(igame_skin_.GetBoneID(0, 0)), glTF::integer>
       boneMap;
   std::vector<GMatrix> inverseBindMatrices(nBones);
   for (std::remove_const_t<decltype(nBones)> iBone = 0; iBone < nBones;
        ++iBone) {
-    auto boneNode = igame_skin_.GetIGameBone(iBone);
+    auto boneNode = igame_skin_.GetIGameBone(iBone, true);
     auto rglTFBoneNode = _nodeMaps2.find(boneNode);
     if (rglTFBoneNode == _nodeMaps2.end()) {
       throw std::runtime_error("Bone node is not in the scene graph.");
     }
 
-    auto boneNodeWordTM = boneNode->GetWorldTM(0);
-    GMatrix initBoneTM;
-    igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
-    // auto inverseBindMatrix = igame_node_.GetWorldTM(0) * initBoneTM;
+    auto boneNodeWorldTM = boneNode->GetWorldTM(0);
+    auto meshNodeWorldTM = igame_node_.GetWorldTM(0);
+    GMatrix initSkinTM; // Transform mesh to world.
+    igame_skin_.GetInitSkinTM(initSkinTM);
+    GMatrix
+        initBoneTM; // Bone's world node TM. (equalavent to `boneNodeWorldTM`?)
+    bool successed = igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
+    GMatrix inverseInitBoneTM = GMatrix(initBoneTM).Inverse();
 
-    auto inverseBindMatrix =
-        boneNode->GetWorldTM(0).Inverse() * igame_node_.GetWorldTM(0);
+    auto inverseBindMatrix = inverseInitBoneTM * meshNodeWorldTM;
 
     inverseBindMatrices[iBone] = inverseBindMatrix;
 
@@ -38,6 +55,16 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
 
     boneMap.emplace(boneNode->GetNodeID(), iBone);
   }
+
+  using JointStorage = glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::unsigned_short>;
+
+  using WeightStorage = glTF::accessor::component_storage_t<
+      glTF::accessor::component_type::the_float>;
+
+  auto nVerts = igame_skin_.GetNumOfSkinnedVerts();
+
+  decltype(_vertex_skin_data::sets) sets;
 
   auto inverseBindMatricesAccessor = _makeSimpleAccessor(
       glTF::accessor::type_type::mat4,
@@ -52,17 +79,13 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
   glTFSkin->inverse_bind_matrices(inverseBindMatricesAccessor);
 
   bool exceedMaxAllowedJoints = false;
-  std::vector<std::pair<std::byte *, std::byte *>> sets;
   auto addset = [&]() {
     auto iset = sets.size();
-    auto jointsChannelData = imm_mesh_.vertices.add_channel(
-        glTF::standard_semantics::joints(iset), glTF::accessor::type_type::vec4,
-        glTF::accessor::component_type::unsigned_short);
-    auto weightsChannelData = imm_mesh_.vertices.add_channel(
-        glTF::standard_semantics::weights(iset),
-        glTF::accessor::type_type::vec4,
-        glTF::accessor::component_type::the_float);
-    sets.push_back({jointsChannelData, weightsChannelData});
+    auto j = std::make_unique<std::byte[]>(sizeof(JointStorage) * 4 * nVerts);
+    std::fill_n(reinterpret_cast<JointStorage*>(j.get()), 4 * nVerts, JointStorage(-1));
+    auto w = std::make_unique<std::byte[]>(sizeof(WeightStorage) * 4 * nVerts);
+    sets.emplace_back(
+        _vertex_skin_data::jw_channel{std::move(j), std::move(w)});
   };
 
   addset();
@@ -81,44 +104,57 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
         }
       };
 
-  auto nVerts = imm_mesh_.vertices.vertex_count();
-  for (std::remove_const_t<decltype(nVerts)> iVertex = 0; iVertex < nVerts;
-       ++iVertex) {
-    auto iFaceVertex = imm_mesh_.vertex_resort[iVertex];
-    const auto nEffectingBones = igame_skin_.GetNumberOfBones(iFaceVertex);
-    ensureSets(nEffectingBones);
-    for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
-         iAffectingBone != nEffectingBones; ++iAffectingBone) {
-      auto iset = iAffectingBone / 4;
-      auto iinflu = iAffectingBone % 4;
+  auto nSkinnedVertices = igame_skin_.GetNumOfSkinnedVerts();
 
-      using JointStorage = glTF::accessor::component_storage_t<
-          glTF::accessor::component_type::unsigned_short>;
+  auto readJW = [&](decltype(nSkinnedVertices) vertex_index_,
+                    decltype(igame_skin_.GetNumberOfBones(
+                        nSkinnedVertices)) affecting_bone_index_) {
+    auto iset = affecting_bone_index_ / 4;
+    auto iinflu = affecting_bone_index_ % 4;
 
-      using WeightStorage = glTF::accessor::component_storage_t<
-          glTF::accessor::component_type::the_float>;
+    auto affectingBoneId =
+        igame_skin_.GetBoneID(vertex_index_, affecting_bone_index_);
+    auto rBoneArrayIndex = boneMap.find(affectingBoneId);
+    if (rBoneArrayIndex == boneMap.end()) {
+      // TODO: warn
+      return;
+    }
 
-      auto affectingBoneId = igame_skin_.GetBoneID(iFaceVertex, iAffectingBone);
-      auto rBoneArrayIndex = boneMap.find(affectingBoneId);
-      if (rBoneArrayIndex == boneMap.end()) {
-        // TODO: warn
-        continue;
+    auto boneArrayIndex = rBoneArrayIndex->second;
+    assert(boneArrayIndex >= 0);
+    reinterpret_cast<JointStorage *>(
+        sets[iset].joints.get())[4 * vertex_index_ + iinflu] = boneArrayIndex;
+
+    auto weight = igame_skin_.GetWeight(vertex_index_, affecting_bone_index_);
+    assert(weight >= 0);
+    reinterpret_cast<WeightStorage *>(
+        sets[iset].weights.get())[4 * vertex_index_ + iinflu] = weight;
+  };
+
+  for (decltype(nSkinnedVertices) iSkinnedVertex = 0;
+       iSkinnedVertex < nSkinnedVertices; ++iSkinnedVertex) {
+    auto vertexType = igame_skin_.GetVertexType(iSkinnedVertex);
+    if (vertexType == IGameSkin::VertexType::IGAME_RIGID) {
+      readJW(iSkinnedVertex, 0);
+    } else {
+      // vertexType == IGameSkin::VertexType::IGAME_RIGID_BLENDED
+      const auto nEffectingBones = igame_skin_.GetNumberOfBones(iSkinnedVertex);
+      ensureSets(nEffectingBones);
+      for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
+           iAffectingBone != nEffectingBones; ++iAffectingBone) {
+        readJW(iSkinnedVertex, iAffectingBone);
       }
-
-      auto boneArrayIndex = rBoneArrayIndex->second;
-      reinterpret_cast<JointStorage *>(sets[iset].first)[4 * iVertex + iinflu] =
-          boneArrayIndex;
-
-      auto weight = igame_skin_.GetWeight(iVertex, iAffectingBone);
-      reinterpret_cast<WeightStorage *>(
-          sets[iset].second)[4 * iVertex + iinflu] = weight;
     }
   }
+
   if (exceedMaxAllowedJoints) {
     // TODO warning
   }
 
-  return glTFSkin;
-#endif
+  _vertex_skin_data vertexSkinData;
+  vertexSkinData.joint_storage = glTF::accessor::component_type::unsigned_short;
+  vertexSkinData.weight_storage = glTF::accessor::component_type::the_float;
+  vertexSkinData.sets = std::move(sets);
+  return {glTFSkin, std::move(vertexSkinData)};
 }
 } // namespace fant
