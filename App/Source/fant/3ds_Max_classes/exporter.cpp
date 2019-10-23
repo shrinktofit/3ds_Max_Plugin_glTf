@@ -92,11 +92,11 @@ void glTf_exporter::ShowAbout(HWND hWnd) {
              _M("About"), MB_OK);
 }
 
-int glTf_exporter::DoExport(const MCHAR *name,
-                            ExpInterface *ei,
-                            Interface *i,
-                            BOOL suppressPrompts,
-                            DWORD options) {
+void do_export(const MCHAR *name,
+               ExpInterface *ei,
+               Interface *i,
+               BOOL suppressPrompts,
+               DWORD options) {
   auto path = std::filesystem::path(name);
 
   export_settings settings;
@@ -159,6 +159,57 @@ int glTf_exporter::DoExport(const MCHAR *name,
       ofs.write(data.data(), data.size());
     }
   }
+}
+
+INT_PTR CALLBACK exporter_dialog_proc(HWND hWnd,
+                                      UINT message,
+                                      WPARAM wParam,
+                                      LPARAM lParam) {
+  switch (message) {
+  case WM_INITDIALOG: {
+    auto exporter = (glTf_exporter *)(lParam);
+    CenterWindow(hWnd, GetParent(hWnd));
+    auto hFormatComboBox = GetDlgItem(hWnd, IDC_COMBO1);
+    ComboBox_AddString(hFormatComboBox, L"Mixed(.gltf + .bin");
+    ComboBox_AddString(hFormatComboBox, L"Binary(.glb)");
+    ComboBox_AddString(hFormatComboBox, L"JSON(.gltf)");
+    ComboBox_SetCurSel(hFormatComboBox, 0);
+    break;
+  }
+  case WM_COMMAND: {
+    switch (LOWORD(wParam)) {
+    case IDOK: {
+      EndDialog(hWnd, 1);
+      break;
+    }
+    case IDCANCEL: {
+      EndDialog(hWnd, 0);
+      break;
+    }
+    }
+    break;
+  }
+  default:
+    return FALSE;
+  }
+  return TRUE;
+}
+
+int glTf_exporter::DoExport(const MCHAR *name,
+                            ExpInterface *ei,
+                            Interface *i,
+                            BOOL suppressPrompts,
+                            DWORD options) {
+  bool showPrompts = !suppressPrompts;
+  if (showPrompts) {
+    auto success = DialogBoxParam(
+        win32::get_instance(), MAKEINTRESOURCE(IDD_GLTF_EXPORTER_DIALOG),
+        i->GetMAXHWnd(), exporter_dialog_proc, (LPARAM)this);
+    if (!success) {
+      return 1;
+    }
+  }
+  // do_export(name, ei, i, suppressPrompts, options);
 
   return 1;
 }

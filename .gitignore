@@ -8,3 +8,5 @@
 build/
 
 .3dsmaxstuffs/
+
+*.aps

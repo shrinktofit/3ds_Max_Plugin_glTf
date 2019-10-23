@@ -13,8 +13,8 @@ file (GLOB_RECURSE sourceFiles "./Source/*.h" "./Source/*.cpp")
 file (GLOB_RECURSE resourceFiles "./Resource/*.rc")
 file (GLOB_RECURSE defFiles "./*.def")
 
-# ENABLE_LANGUAGE (RC)
-set_source_files_properties (${resourceFiles} PROPERTIES LANGUAGE RC)
+## ENABLE_LANGUAGE (RC)
+## set_source_files_properties (${resourceFiles} PROPERTIES LANGUAGE RC)
 
 add_library (${MAIN_TARGET_NAME} SHARED ${sourceFiles} ${defFiles} ${resourceFiles})
 
@@ -29,6 +29,9 @@ target_compile_definitions (
 	_USRDLL
 	NOMINMAX
 )
+
+set(rc_flags "/D _MSC_VER")
+set(CMAKE_RC_FLAGS ${rc_flags})
 
 # set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 target_compile_options(${PROJECT_NAME} PUBLIC "/std:c++latest")
