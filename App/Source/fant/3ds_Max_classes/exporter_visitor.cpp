@@ -97,7 +97,7 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
         auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
         glTFNode->mesh(glTFMesh);
         if (glTFSkin) {
-          // glTFNode->skin(glTFSkin);
+          glTFNode->skin(glTFSkin);
         }
       }
     } break;
