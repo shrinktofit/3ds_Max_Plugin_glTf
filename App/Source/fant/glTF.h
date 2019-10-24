@@ -744,8 +744,52 @@ private:
   factory_type _factory;
 };
 
-class node : public object_base {
+class node : public object_base, public std::enable_shared_from_this<node> {
 public:
+  using position_type = std::array<number, 3>;
+
+  using scale_type = std::array<number, 3>;
+
+  using rotation_type = std::array<number, 4>;
+
+  using matrix_type = std::array<number, 16>;
+
+  object_ptr<node> parent() {
+    return _parent.expired() ? nullptr : _parent.lock();
+  }
+
+  bool is_trs() const {
+    return std::holds_alternative<_trs_type>(_transform);
+  }
+
+  position_type position() const {
+    return std::get<_trs_type>(_transform).position;
+  }
+
+  void position(const position_type &value_) {
+    std::get<_trs_type>(_transform).position = value_;
+  }
+
+  scale_type scale() const {
+    return std::get<_trs_type>(_transform).scale;
+  }
+
+  void scale(const scale_type &value_) {
+    std::get<_trs_type>(_transform).scale = value_;
+  }
+
+  rotation_type rotation() const {
+    return std::get<_trs_type>(_transform).rotation;
+  }
+
+  matrix_type matrix() const {
+    return std::get<matrix_type>(_transform);
+  }
+
+  void rotation(const rotation_type &value_) {
+    std::get<_trs_type>(_transform).rotation = value_;
+  }
+
   void mesh(object_ptr<glTF::mesh> mesh_) {
     _mesh = mesh_;
   }
@@ -755,41 +799,25 @@ public:
   }
 
   void add_child(object_ptr<glTF::node> child_) {
+    assert(child_->_parent.expired());
     _children.push_back(child_);
-  }
-
-  void set_position(number x_, number y_, number z_) {
-    _position.emplace();
-    (*_position)[0] = x_;
-    (*_position)[1] = y_;
-    (*_position)[2] = z_;
-  }
-
-  void set_scale(number x_, number y_, number z_) {
-    _scale.emplace();
-    (*_scale)[0] = x_;
-    (*_scale)[1] = y_;
-    (*_scale)[2] = z_;
-  }
-
-  void set_rotation(number x_, number y_, number z_, number w_) {
-    _rotation.emplace();
-    (*_rotation)[0] = x_;
-    (*_rotation)[1] = y_;
-    (*_rotation)[2] = z_;
-    (*_rotation)[3] = w_;
+    child_->_parent = shared_from_this();
   }
 
   glTF_json serialize(const document &document_) const;
 
 private:
+  std::weak_ptr<node> _parent;
   std::vector<object_ptr<node>> _children;
   object_ptr<glTF::mesh> _mesh;
   object_ptr<glTF::skin> _skin;
-  std::optional<std::array<number, 3>> _position;
-  std::optional<std::array<number, 3>> _scale;
-  std::optional<std::array<number, 4>> _rotation;
-  std::optional<std::array<number, 16>> _matrix;
+  struct _trs_type {
+    std::array<number, 3> position = {(number)0, (number)0, (number)0};
+    std::array<number, 3> scale = {(number)1, (number)1, (number)1};
+    std::array<number, 4> rotation = {(number)0, (number)0, (number)0,
+                                      (number)1};
+  };
+  std::variant<_trs_type, matrix_type> _transform;
 };
 
 class camera : public object_base {};

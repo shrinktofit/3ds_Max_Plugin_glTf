@@ -428,24 +428,21 @@ glTF_json animation::sampler::serialize(const document &document_) const {
 
 glTF_json node::serialize(const document &document_) const {
   auto result = object_base::serialize(document_);
-  if (_position) {
-    if (auto t = *_position; !(t[0] == 0 && t[1] == 0 && t[2] == 0)) {
-      result["translation"] = *_position;
+  if (std::holds_alternative<_trs_type>(_transform)) {
+    auto &trs = std::get<_trs_type>(_transform);
+    if (auto t = trs.position; !(t[0] == 0 && t[1] == 0 && t[2] == 0)) {
+      result["translation"] = t;
     }
-  }
-  if (_rotation) {
-    if (auto r = *_rotation;
+    if (auto r = trs.rotation;
         !(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 1)) {
       result["rotation"] = r;
     }
-  }
-  if (_scale) {
-    if (auto s = *_scale; !(s[0] == 1 && s[1] == 1 && s[2] == 1)) {
+    if (auto s = trs.scale; !(s[0] == 1 && s[1] == 1 && s[2] == 1)) {
       result["scale"] = s;
     }
-  }
-  if (_matrix) {
-    result["matrix"] = *_matrix;
+  } else {
+    auto &matrix = std::get<matrix_type>(_transform);
+    result["matrix"] = matrix;
   }
   if (_mesh) {
     result["mesh"] = document_.factory().index_of(_mesh);

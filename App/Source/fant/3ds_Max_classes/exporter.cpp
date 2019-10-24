@@ -195,21 +195,31 @@ INT_PTR CALLBACK exporter_dialog_proc(HWND hWnd,
   return TRUE;
 }
 
+std::u8string get_config_filename(Interface &max_interface_) {
+  // APP_PLUGCFG_DIR
+  auto plugcfdDirMSTR = max_interface_.GetDir(APP_PLUGCFG_LN_DIR);
+  auto result = win32::mchar_to_utf8(
+      std::basic_string_view<MCHAR>(plugcfdDirMSTR, _tcslen(plugcfdDirMSTR)));
+  return result;
+}
+
 int glTf_exporter::DoExport(const MCHAR *name,
                             ExpInterface *ei,
                             Interface *i,
                             BOOL suppressPrompts,
                             DWORD options) {
-  bool showPrompts = !suppressPrompts;
-  if (showPrompts) {
-    auto success = DialogBoxParam(
-        win32::get_instance(), MAKEINTRESOURCE(IDD_GLTF_EXPORTER_DIALOG),
-        i->GetMAXHWnd(), exporter_dialog_proc, (LPARAM)this);
-    if (!success) {
-      return 1;
-    }
-  }
-  // do_export(name, ei, i, suppressPrompts, options);
+  // bool showPrompts = !suppressPrompts;
+  // if (showPrompts) {
+  //  auto success = DialogBoxParam(
+  //      win32::get_instance(), MAKEINTRESOURCE(IDD_GLTF_EXPORTER_DIALOG),
+  //      i->GetMAXHWnd(), exporter_dialog_proc, (LPARAM)this);
+
+  //  /*if (!success) {
+  //    return 1;
+  //  }*/
+  //}
+  (void)get_config_filename(*i);
+  do_export(name, ei, i, suppressPrompts, options);
 
   return 1;
 }

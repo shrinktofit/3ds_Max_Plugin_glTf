@@ -62,6 +62,9 @@ target_link_libraries(
 	${3DSMAX_SDK_LIB_DIR}/igame.lib
 )
 
+find_package(glm CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} glm)
+
 find_package(nlohmann_json CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} nlohmann_json)
 

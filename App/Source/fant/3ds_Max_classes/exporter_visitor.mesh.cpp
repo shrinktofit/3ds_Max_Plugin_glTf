@@ -1,6 +1,7 @@
 
 #include <CS/BIPEXP.H>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace fant {
 std::pair<
@@ -27,14 +28,16 @@ exporter_visitor::_immediate_mesh::vertex_list::to_indexed() const {
                        return std::memcmp(unique_, pVertex, positionBytes) == 0;
                      });
     if (rUnique != uniqueVertices.end()) {
-      indices[iVertex] = (rUnique - uniqueVertices.begin());
+      indices[iVertex] =
+          static_cast<vertex_count_type>(rUnique - uniqueVertices.begin());
     } else {
-      indices[iVertex] = (uniqueVertices.size());
+      indices[iVertex] = static_cast<vertex_count_type>(uniqueVertices.size());
       uniqueVertices.push_back(pVertex);
     }
   }
 
-  vertex_list indexedVertices(uniqueVertices.size());
+  vertex_list indexedVertices(
+      static_cast<vertex_count_type>(uniqueVertices.size()));
   for (auto &channel : _channels) {
     auto attributeBytes = channel.second.attribute_bytes();
     auto originalChannelData = channel.second.data.get();
@@ -226,12 +229,14 @@ std::optional<exporter_visitor::_immediate_mesh> exporter_visitor::_exportMesh(
     return std::nullopt;
   }
 
-  auto name = _convertMaxName(igame_mesh_.GetClassName());
+  auto name = _convertMaxName(igame_node_.GetName());
 
   auto mapNums = igame_mesh_.GetActiveMapChannelNum();
   auto nMapNums = mapNums.Count();
 
   auto objectOffsetTransform = _getObjectOffsetTransformMatrix(igame_node_, 0);
+  auto objectOffsetInverseTransposed =
+      glm::mat3(glm::transpose(glm::inverse(objectOffsetTransform)));
 
   struct ChannelList {
     PositionChannelComponent *potition;
@@ -287,22 +292,22 @@ std::optional<exporter_visitor::_immediate_mesh> exporter_visitor::_exportMesh(
   };
 
   auto addFace = [&](ChannelList &channels_, FaceEx &face_, int face_index_) {
-    for (int iFaceCorner = 0; iFaceCorner < 3; ++iFaceCorner) {
-      auto outputVertexIndex = 3 * face_index_ + iFaceCorner;
+    auto addCorner = [&](int corner_index_) {
+      auto outputVertexIndex = 3 * face_index_ + corner_index_;
 
-      auto iVertex = face_.vert[iFaceCorner];
+      auto iVertex = face_.vert[corner_index_];
       auto vertex = igame_mesh_.GetVertex(iVertex, true);
       auto objectOffsetAppliedVertex =
-          _transformPoint(objectOffsetTransform, vertex);
-      _convert(objectOffsetAppliedVertex,
-               channels_.potition + 3 * outputVertexIndex);
+          glm::vec3(objectOffsetTransform * glm::vec4(_toGLM(vertex), 1.0));
+      std::copy_n(glm::value_ptr(objectOffsetAppliedVertex), 3,
+                  channels_.potition + 3 * outputVertexIndex);
 
-      auto iNormal = face_.norm[iFaceCorner];
+      auto iNormal = face_.norm[corner_index_];
       auto normal = igame_mesh_.GetNormal(iNormal, true);
       auto objectOffsetAppliedNormal =
-          _transformVector(objectOffsetTransform, vertex).Normalize();
-      _convert(objectOffsetAppliedNormal,
-               channels_.normal + 3 * outputVertexIndex);
+          glm::normalize(objectOffsetInverseTransposed * _toGLM(normal));
+      std::copy_n(glm::value_ptr(objectOffsetAppliedNormal), 3,
+                  channels_.normal + 3 * outputVertexIndex);
 
       for (decltype(nMapNums) iMapNum = 0; iMapNum < nMapNums; ++iMapNum) {
         auto iMap = mapNums[iMapNum];
@@ -314,7 +319,7 @@ std::optional<exporter_visitor::_immediate_mesh> exporter_visitor::_exportMesh(
 
         Point3 uvw;
         success =
-            igame_mesh_.GetMapVertex(iMap, mapFaceIndex[iFaceCorner], uvw);
+            igame_mesh_.GetMapVertex(iMap, mapFaceIndex[corner_index_], uvw);
         assert(success);
 
         if (iMap == 0) {
@@ -345,6 +350,10 @@ std::optional<exporter_visitor::_immediate_mesh> exporter_visitor::_exportMesh(
                       &weightChannel[weightBytes * outputVertexIndex]);
         }
       }
+    };
+
+    for (int iFaceCorner = 0; iFaceCorner < 3; ++iFaceCorner) {
+      addCorner(iFaceCorner);
     }
   };
 

@@ -4,6 +4,9 @@
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 #include <filesystem>
 #include <functional>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/transform.hpp>
 
 namespace fant {
 exporter_visitor::exporter_visitor(Interface &max_interface_,
@@ -87,14 +90,14 @@ exporter_visitor::exporter_visitor(Interface &max_interface_,
       std::optional<_vertex_skin_data> vertexSkinData;
       if (igameMesh.IsObjectSkinned()) {
         std::tie(glTFSkin, vertexSkinData) =
-            _exportSkin(igameNode, *igameMesh.GetIGameSkin());
+            _exportSkin(igameNode, *igameMesh.GetIGameSkin(), glTFNode);
       }
       if (auto immMesh = _exportMesh(igameNode, igameMesh, vertexSkinData)) {
         auto glTFMaterials = _tryExportMaterial(*igameNode.GetMaxNode());
         auto glTFMesh = _convertMesh(*immMesh, glTFMaterials);
         glTFNode->mesh(glTFMesh);
         if (glTFSkin) {
-          glTFNode->skin(glTFSkin);
+          // glTFNode->skin(glTFSkin);
         }
       }
     } break;
@@ -190,13 +193,15 @@ Matrix3 exporter_visitor::_getLocalNodeTransformMatrix(INode &max_node_,
   }
 }
 
-GMatrix
+glm::mat4
 exporter_visitor::_getObjectOffsetTransformMatrix(IGameNode &igame_node_,
                                                   TimeValue time_) {
-  auto objectOffsetWorld = igame_node_.GetObjectTM(time_);
-  auto invObjectdOffsetWorld = objectOffsetWorld.Inverse();
-  auto worldTM = igame_node_.GetWorldTM(time_);
-  return invObjectdOffsetWorld * worldTM;
+  auto &maxNode = *igame_node_.GetMaxNode();
+  auto maxPos = maxNode.GetObjOffsetPos();
+  auto maxScale = maxNode.GetObjOffsetScale().s;
+  auto maxRot = maxNode.GetObjOffsetRot();
+  auto maxTrans = _composeTRS(_toGLM(maxPos), _toGLM(maxRot), _toGLM(maxScale));
+  return _maxToGLTF(maxTrans);
 }
 
 Point3 exporter_visitor::_transformPoint(const GMatrix &matrix_,
@@ -214,5 +219,73 @@ Point3 exporter_visitor::_transformVector(const GMatrix &matrix_,
   }
 
   return point_ * inverseTransposed;
+}
+
+glm::mat4
+exporter_visitor::_calculateLocalMatrix(glTF::object_ptr<glTF::node> node_) {
+  if (!node_->is_trs()) {
+    return glm::make_mat4(node_->matrix().data());
+  } else {
+    auto position = glm::make_vec3(node_->position().data());
+    auto scale = glm::make_vec3(node_->scale().data());
+    auto rotation = glm::make_quat(node_->rotation().data());
+    return _composeTRS(position, rotation, scale);
+  }
+}
+
+glm::mat4
+exporter_visitor::_calculateWorldMatrix(glTF::object_ptr<glTF::node> node_) {
+  auto localTM = _calculateLocalMatrix(node_);
+  if (auto parent = node_->parent()) {
+    return _calculateWorldMatrix(parent) * localTM;
+  } else {
+    return localTM;
+  }
+}
+
+glm::mat4 exporter_visitor::_composeTRS(const glm::vec3 &translation_,
+                                        const glm::quat &rotation_,
+                                        const glm::vec3 &scale_) {
+  return glm::translate(translation_) * glm::mat4_cast(rotation_) *
+         glm::scale(scale_);
+}
+
+glm::mat4 exporter_visitor::_toGLM(const GMatrix &matrix_) {
+  // glm expect the matrices to be column vector and stored in column majar;
+  // In 3ds Max, all vectors are assumed to be row vectors.
+  glm::mat4 result;
+  for (int r = 0; r < 4; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      // We actually done the transpose: it should have been `out[c * 4 +
+      // r]`(column major).
+      glm::value_ptr(result)[r * 4 + c] = matrix_.GetRow(r)[c];
+    }
+  }
+  return result;
+}
+
+glm::vec3 exporter_visitor::_toGLM(const Point3 &point_) {
+  return glm::vec3(point_.x, point_.y, point_.z);
+}
+
+glm::quat exporter_visitor::_toGLM(const Quat &quat_) {
+  return glm::quat(quat_.w, quat_.x, quat_.y, quat_.z);
+}
+
+glm::vec3 exporter_visitor::_maxToGLTF(const glm::vec3 &vector_) {
+  return glm::vec3(vector_.x, vector_.z, -vector_.y);
+}
+
+glm::quat exporter_visitor::_maxToGLTF(const glm::quat &quat_) {
+  assert(glm::normalize(quat_) == quat_);
+  auto angle = glm::angle(quat_);
+  auto axis = glm::axis(quat_);
+  return glm::angleAxis(-angle, _maxToGLTF(axis));
+}
+
+glm::mat4 exporter_visitor::_maxToGLTF(const glm::mat4 &matrix_) {
+  auto maxToGLTF = glm::rotate(
+      glm::radians(static_cast<glm::mat4::value_type>(90)), glm::vec3(1, 0, 0));
+  return glm::inverse(maxToGLTF) * matrix_ * maxToGLTF;
 }
 } // namespace fant

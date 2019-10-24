@@ -7,18 +7,18 @@ void exporter_visitor::_setTrs(glTF::node &node_,
                                const Quat &r_,
                                const Point3 &s_) {
   if (t_ != Point3::Origin) {
-    node_.set_position(t_.x, t_.y, t_.z);
+    node_.position({t_.x, t_.y, t_.z});
   }
 
   if (s_ != Point3(1, 1, 1)) {
-    node_.set_scale(s_.x, s_.y, s_.z);
+    node_.scale({s_.x, s_.y, s_.z});
   }
 
   if (!r_.IsIdentity()) {
     auto normr = Quat(r_);
     normr.Normalize();
     normr = _igameToGlTF(normr);
-    node_.set_rotation(normr.x, normr.y, normr.z, -normr.w);
+    node_.rotation({-normr.x, -normr.y, normr.z, normr.w});
   }
 }
 
@@ -39,26 +39,13 @@ void exporter_visitor::_setTrs(glTF::node &node_, const GMatrix &matrix_) {
           _convertIntoGlTFAxisSystem(matrix_.Scaling()));
 }
 
-glTF::object_ptr<glTF::node> exporter_visitor::_convertNode(INode &max_node_) {
-  auto maxNodeName = std::basic_string_view<MCHAR>(max_node_.GetName());
-  auto name = win32::mchar_to_utf8(maxNodeName);
-  auto localNodeTM = _getLocalNodeTransformMatrix(max_node_, 0);
-  auto glTFNode = _document.factory().make<glTF::node>();
-  glTFNode->name(name);
-  _setTrs(*glTFNode, _convertIntoGlTFAxisSystem(localNodeTM));
-  return glTFNode;
-}
-
 glTF::object_ptr<glTF::node>
 exporter_visitor::_exportNode(IGameNode &igame_node_) {
   auto glTFNode = _document.factory().make<glTF::node>();
 
   auto name = _convertMaxName(igame_node_.GetName());
   glTFNode->name(name);
-  auto namen = reinterpret_cast<const char*>(name.c_str());
-
-  auto gameWTM = igame_node_.GetWorldTM(0);
-  auto rawWTM = GMatrix(igame_node_.GetMaxNode()->GetNodeTM(0));
+  auto namen = reinterpret_cast<const char *>(name.c_str());
 
   _setTrs(*glTFNode, igame_node_.GetLocalTM(0));
 
@@ -81,24 +68,5 @@ Matrix3 exporter_visitor::_calcOffsetTransformMatrix(INode &max_node_) {
   ScaleValue scaleValue = max_node_.GetObjOffsetScale();
   ApplyScaling(tm, scaleValue);
   return tm;
-}
-
-glTF::object_ptr<glTF::node>
-exporter_visitor::_trySimulateObjectOffsetTransform(INode &max_node_) {
-  auto pos = max_node_.GetObjOffsetPos();
-  auto rot = max_node_.GetObjOffsetRot();
-  auto scaleValue = max_node_.GetObjOffsetScale();
-
-  if (pos == Point3::Origin && rot.IsIdentity() &&
-      scaleValue.s == Point3(1, 1, 1)) {
-    return nullptr;
-  }
-
-  auto glTFNode = _document.factory().make<glTF::node>();
-  glTFNode->name(u8"Object Offset Transform");
-  _setTrs(*glTFNode, _convertIntoGlTFAxisSystem(pos),
-          _convertIntoGlTFAxisSystem(rot),
-          _convertIntoGlTFAxisSystem(scaleValue.s));
-  return glTFNode;
 }
 } // namespace fant

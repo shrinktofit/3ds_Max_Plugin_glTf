@@ -90,6 +90,7 @@ exporter_visitor::_exportMaterial(IGameMaterial &igame_materail_) {
       }
       subGlTFMaterials[iSubMaterial] = subGlTFMaterial.front();
     }
+    return subGlTFMaterials;
   } else {
     return _tryConvertMaterial(*igame_materail_.GetMaxMaterial());
   }

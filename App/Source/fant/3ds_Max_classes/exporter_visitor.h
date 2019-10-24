@@ -13,6 +13,7 @@
 #include <fant/support/win32/mchar_to_utf8.h>
 #include <filesystem>
 #include <fstream>
+#include <glm/glm.hpp>
 #include <gsl/span>
 #include <iskin.h>
 #include <list>
@@ -177,12 +178,7 @@ private:
     std::vector<jw_channel> sets;
   };
 
-  glTF::object_ptr<glTF::node> _convertNode(INode &max_node_);
-
   glTF::object_ptr<glTF::node> _exportNode(IGameNode &igame_node_);
-
-  glTF::object_ptr<glTF::node>
-  _trySimulateObjectOffsetTransform(INode &max_node_);
 
   std::optional<_immediate_mesh>
   _exportMesh(IGameNode &igame_node_,
@@ -197,7 +193,9 @@ private:
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
   std::pair<glTF::object_ptr<glTF::skin>, _vertex_skin_data>
-  _exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_);
+  _exportSkin(IGameNode &igame_node_,
+              IGameSkin &igame_skin_,
+              glTF::object_ptr<glTF::node> glTF_mesh_node_);
 
   std::vector<glTF::object_ptr<glTF::material>>
   _exportMaterial(IGameMaterial &igame_materail_);
@@ -222,12 +220,6 @@ private:
                       glTF::object_ptr<glTF::node> glTF_node_,
                       glTF::object_ptr<glTF::accessor> input_);
 
-  template <typename Out> void _convert(const Point3 &value_, Out *out_) {
-    out_[0] = value_.x;
-    out_[1] = value_.y;
-    out_[2] = value_.z;
-  }
-
   template <typename Out> void _convert(const GMatrix &value_, Out *out_) {
     // glTF expect the matrices to be column vector and stored in column majar;
     // In 3ds Max, all vectors are assumed to be row vectors.
@@ -238,19 +230,6 @@ private:
         out_[r * 4 + c] = value_.GetRow(r)[c];
       }
     }
-  }
-
-  void _writePoint3(float *output_, const Point3 &p_) {
-    output_[0] = p_.x;
-    output_[1] = p_.y;
-    output_[2] = p_.z;
-  }
-
-  void _writeQuat(float *output_, const Quat &q_) {
-    output_[0] = q_.x;
-    output_[1] = q_.y;
-    output_[2] = q_.z;
-    output_[2] = q_.w;
   }
 
   glTF::object_ptr<glTF::accessor>
@@ -275,7 +254,6 @@ private:
   Interface &_maxInterface;
   glTF::document &_document;
   const export_settings &_settings;
-  std::unordered_map<INode *, glTF::object_ptr<glTF::node>> _nodeMaps;
   std::unordered_map<IGameNode *, glTF::object_ptr<glTF::node>> _nodeMaps2;
   std::unordered_map<Mtl *, std::vector<glTF::object_ptr<glTF::material>>>
       _materialMap;
@@ -430,11 +408,31 @@ private:
   static Matrix3 _getLocalNodeTransformMatrix(INode &max_node_,
                                               TimeValue time_);
 
-  static GMatrix _getObjectOffsetTransformMatrix(IGameNode &igame_node_,
-                                                 TimeValue time_);
+  static glm::mat4 _getObjectOffsetTransformMatrix(IGameNode &igame_node_,
+                                                   TimeValue time_);
 
   static Point3 _transformPoint(const GMatrix &matrix_, const Point3 &point_);
 
   static Point3 _transformVector(const GMatrix &matrix_, const Point3 &point_);
+
+  static glm::mat4 _calculateLocalMatrix(glTF::object_ptr<glTF::node> node_);
+
+  static glm::mat4 _calculateWorldMatrix(glTF::object_ptr<glTF::node> node_);
+
+  static glm::mat4 _composeTRS(const glm::vec3 &translation_,
+                               const glm::quat &rotation_,
+                               const glm::vec3 &scale_);
+
+  static glm::mat4 _toGLM(const GMatrix &matrix_);
+
+  static glm::vec3 _toGLM(const Point3 &matrix_);
+
+  static glm::quat _toGLM(const Quat &quat_);
+
+  static glm::vec3 _maxToGLTF(const glm::vec3 &vector_);
+
+  static glm::quat _maxToGLTF(const glm::quat &quat_);
+
+  static glm::mat4 _maxToGLTF(const glm::mat4 &matrix_);
 };
 } // namespace fant

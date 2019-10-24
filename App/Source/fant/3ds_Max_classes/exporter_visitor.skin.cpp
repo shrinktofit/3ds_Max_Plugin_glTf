@@ -1,10 +1,15 @@
 
 #include <IGame/IGameModifier.h>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 namespace fant {
 std::pair<glTF::object_ptr<glTF::skin>, exporter_visitor::_vertex_skin_data>
-exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
+exporter_visitor::_exportSkin(IGameNode &igame_node_,
+                              IGameSkin &igame_skin_,
+                              glTF::object_ptr<glTF::node> glTF_mesh_node_) {
   // https://github.com/OGRECave/EasyOgreExporter/blob/master/source/ExSkeleton.cpp
   // https://github.com/homer6/c_reading/blob/4dc6b608203bb0a053c703d80b6af5e1141983ab/cat_mother/maxexport/SgUtil.cpp
   auto glTFSkin = _document.factory().make<glTF::skin>();
@@ -28,7 +33,7 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
   }
   std::unordered_map<decltype(igame_skin_.GetBoneID(0, 0)), glTF::integer>
       boneMap;
-  std::vector<GMatrix> inverseBindMatrices(nBones);
+  std::vector<glm::mat4> inverseBindMatrices(nBones);
   for (std::remove_const_t<decltype(nBones)> iBone = 0; iBone < nBones;
        ++iBone) {
     auto boneNode = igame_skin_.GetIGameBone(iBone, true);
@@ -36,21 +41,33 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
     if (rglTFBoneNode == _nodeMaps2.end()) {
       throw std::runtime_error("Bone node is not in the scene graph.");
     }
+    auto glTFBoneNode = rglTFBoneNode->second;
 
-    auto boneNodeWorldTM = boneNode->GetWorldTM(0);
-    auto meshNodeWorldTM = igame_node_.GetWorldTM(0);
-    GMatrix initSkinTM; // Transform mesh to world.
-    igame_skin_.GetInitSkinTM(initSkinTM);
-    GMatrix
-        initBoneTM; // Bone's world node TM. (equalavent to `boneNodeWorldTM`?)
-    bool successed = igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
-    GMatrix inverseInitBoneTM = GMatrix(initBoneTM).Inverse();
+    //auto boneNodeWorldTM = boneNode->GetWorldTM(0);
+    //auto meshNodeWorldTM = igame_node_.GetWorldTM(0);
+    //GMatrix initSkinTM; // Transform mesh to world.
+    //igame_skin_.GetInitSkinTM(initSkinTM);
+    //GMatrix
+    //    initBoneTM; // Bone's world node TM. (equalavent to `boneNodeWorldTM`?)
+    //bool successed = igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
+    //GMatrix inverseInitBoneTM = GMatrix(initBoneTM).Inverse();
+
+    auto meshNodeWorldTM = _calculateWorldMatrix(glTF_mesh_node_);
+    auto initBoneTM = _calculateWorldMatrix(glTFBoneNode);
+    auto inverseInitBoneTM = glm::inverse(initBoneTM);
 
     auto inverseBindMatrix = inverseInitBoneTM * meshNodeWorldTM;
 
+    glm::vec3 t;
+    glm::vec3 s;
+    glm::quat r;
+    glm::vec3 skew;
+    glm::vec4 per;
+    auto decomposeresult = glm::decompose(inverseBindMatrix, s,r, t, skew, per);
+    std::cout << decomposeresult;
+
     inverseBindMatrices[iBone] = inverseBindMatrix;
 
-    auto glTFBoneNode = rglTFBoneNode->second;
     glTFSkin->add_joint(glTFBoneNode);
 
     boneMap.emplace(boneNode->GetNodeID(), iBone);
@@ -74,7 +91,8 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
           ->typed_data<glTF::accessor::component_type::the_float>();
   for (decltype(inverseBindMatrices.size()) i = 0;
        i < inverseBindMatrices.size(); ++i) {
-    _convert(inverseBindMatrices[i], inverseBindMatricesData + 16 * i);
+    std::copy_n(glm::value_ptr(inverseBindMatrices[i]), 16,
+                inverseBindMatricesData + 16 * i);
   }
   glTFSkin->inverse_bind_matrices(inverseBindMatricesAccessor);
 
@@ -82,7 +100,8 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_, IGameSkin &igame_skin_) {
   auto addset = [&]() {
     auto iset = sets.size();
     auto j = std::make_unique<std::byte[]>(sizeof(JointStorage) * 4 * nVerts);
-    std::fill_n(reinterpret_cast<JointStorage*>(j.get()), 4 * nVerts, JointStorage(-1));
+    std::fill_n(reinterpret_cast<JointStorage *>(j.get()), 4 * nVerts,
+                JointStorage(-1));
     auto w = std::make_unique<std::byte[]>(sizeof(WeightStorage) * 4 * nVerts);
     sets.emplace_back(
         _vertex_skin_data::jw_channel{std::move(j), std::move(w)});
