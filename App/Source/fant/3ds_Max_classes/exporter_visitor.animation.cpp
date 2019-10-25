@@ -1,5 +1,6 @@
 
 #include <fant/3ds_Max_classes/exporter_visitor.h>
+#include <glm/gtc/type_ptr.hpp>
 #include <variant>
 
 namespace fant {
@@ -27,21 +28,40 @@ void exporter_visitor::_bakeAnimation(IGameNode &igame_node_,
     return;
   }
 
-  std::vector<Point3> positions(frame_count_);
-  std::vector<Quat> rotations(frame_count_);
-  std::vector<Point3> scales(frame_count_);
+  std::vector<glm::vec3> positions(frame_count_);
+  std::vector<glm::quat> rotations(frame_count_);
+  std::vector<glm::vec3> scales(frame_count_);
   for (decltype(localNodeTMs.size()) iTM = 0; iTM < localNodeTMs.size();
        ++iTM) {
-    positions[iTM] = localNodeTMs[iTM].Translation();
-    rotations[iTM] = _igameToGlTF(localNodeTMs[iTM].Rotation());
-    scales[iTM] = localNodeTMs[iTM].Scaling();
+    auto [translation, rotation, scale] =
+        _decomposeTRS(_toGLM(localNodeTMs[iTM]));
+    positions[iTM] = translation;
+    rotations[iTM] = _mathconv_igame_to_glTF::convert_rotation(rotation);
+    scales[iTM] = scale;
+  }
+
+  /// DEBUG
+  for (decltype(localNodeTMs.size()) iTM = 0; iTM < localNodeTMs.size();
+    ++iTM) {
+    auto [translation, rotation, scale] =
+      _decomposeTRS(_toGLM(localNodeTMs[iTM]));
+    rotations[iTM] = _mathconv_igame_to_glTF::convert_rotation(rotation);
   }
 
   if (!std::all_of(positions.begin() + 1, positions.end(),
                    [&](const auto &position_) {
                      return position_ == positions.front();
                    })) {
-    auto accessor = _makeSimpleAccessor(gsl::make_span(positions));
+    auto accessor = _makeSimpleAccessor(
+        glTF::accessor::type_type::vec3,
+        glTF::accessor::component_type::the_float,
+        static_cast<glTF::accessor::size_type>(positions.size()));
+    auto accessorData =
+        accessor->typed_data<glTF::accessor::component_type::the_float>();
+    for (decltype(positions.size()) i = 0; i < positions.size(); ++i) {
+      std::copy_n(glm::value_ptr(positions[i]), 3, accessorData + 3 * i);
+    }
+
     auto sampler = _mainAnimation->factory().make<glTF::animation::sampler>(
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(
@@ -55,7 +75,16 @@ void exporter_visitor::_bakeAnimation(IGameNode &igame_node_,
                    [&](const auto &rotation_) {
                      return rotation_ == rotations.front();
                    })) {
-    auto accessor = _makeSimpleAccessor(gsl::make_span(rotations));
+    auto accessor = _makeSimpleAccessor(
+        glTF::accessor::type_type::vec4,
+        glTF::accessor::component_type::the_float,
+        static_cast<glTF::accessor::size_type>(rotations.size()));
+    auto accessorData =
+        accessor->typed_data<glTF::accessor::component_type::the_float>();
+    for (decltype(rotations.size()) i = 0; i < rotations.size(); ++i) {
+      std::copy_n(glm::value_ptr(rotations[i]), 4, accessorData + 4 * i);
+    }
+
     auto sampler = _mainAnimation->factory().make<glTF::animation::sampler>(
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(
@@ -68,7 +97,16 @@ void exporter_visitor::_bakeAnimation(IGameNode &igame_node_,
   if (!std::all_of(scales.begin() + 1, scales.end(), [&](const auto &scale_) {
         return scale_ == scales.front();
       })) {
-    auto accessor = _makeSimpleAccessor(gsl::make_span(scales));
+    auto accessor = _makeSimpleAccessor(
+        glTF::accessor::type_type::vec3,
+        glTF::accessor::component_type::the_float,
+        static_cast<glTF::accessor::size_type>(scales.size()));
+    auto accessorData =
+        accessor->typed_data<glTF::accessor::component_type::the_float>();
+    for (decltype(scales.size()) i = 0; i < scales.size(); ++i) {
+      std::copy_n(glm::value_ptr(scales[i]), 3, accessorData + 3 * i);
+    }
+
     auto sampler = _mainAnimation->factory().make<glTF::animation::sampler>(
         input_, accessor);
     _mainAnimation->factory().make<glTF::animation::channel>(

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
 
@@ -200,8 +201,13 @@ exporter_visitor::_getObjectOffsetTransformMatrix(IGameNode &igame_node_,
   auto maxPos = maxNode.GetObjOffsetPos();
   auto maxScale = maxNode.GetObjOffsetScale().s;
   auto maxRot = maxNode.GetObjOffsetRot();
-  auto maxTrans = _composeTRS(_toGLM(maxPos), _toGLM(maxRot), _toGLM(maxScale));
-  return _maxToGLTF(maxTrans);
+  /*auto maxTrans = _composeTRS(_toGLM(maxPos), _toGLM(maxRot),
+  _toGLM(maxScale)); return _maxToGLTF(maxTrans);*/
+  auto trans =
+      _composeTRS(_mathconv_max_to_glTF::convert_point(_toGLM(maxPos)),
+                  _mathconv_max_to_glTF::convert_rotation(_toGLM(maxRot)),
+                  _mathconv_max_to_glTF::convert_scale(_toGLM(maxScale)));
+  return trans;
 }
 
 Point3 exporter_visitor::_transformPoint(const GMatrix &matrix_,
@@ -243,6 +249,21 @@ exporter_visitor::_calculateWorldMatrix(glTF::object_ptr<glTF::node> node_) {
   }
 }
 
+exporter_visitor::_trs
+exporter_visitor::_decomposeTRS(const glm::mat4 &matrix_) {
+  auto translation = glm::zero<glm::vec3>();
+  glm::vec3 scale(1, 1, 1);
+  auto rotation = glm::identity<glm::quat>();
+  auto skew = glm::zero<glm::vec3>();
+  auto perspective = glm::zero<glm::vec4>();
+  auto decomposeresult =
+      glm::decompose(matrix_, scale, rotation, translation, skew, perspective);
+  if (!decomposeresult) {
+    // TODO
+  }
+  return {translation, rotation, scale};
+}
+
 glm::mat4 exporter_visitor::_composeTRS(const glm::vec3 &translation_,
                                         const glm::quat &rotation_,
                                         const glm::vec3 &scale_) {
@@ -272,20 +293,39 @@ glm::quat exporter_visitor::_toGLM(const Quat &quat_) {
   return glm::quat(quat_.w, quat_.x, quat_.y, quat_.z);
 }
 
-glm::vec3 exporter_visitor::_maxToGLTF(const glm::vec3 &vector_) {
-  return glm::vec3(vector_.x, vector_.z, -vector_.y);
+glm::vec3 exporter_visitor::_mathconv_max_to_glTF::convert_point(
+    const glm::vec3 &point_) {
+  return glm::vec3(point_.x, point_.z, -point_.y);
 }
 
-glm::quat exporter_visitor::_maxToGLTF(const glm::quat &quat_) {
-  assert(glm::normalize(quat_) == quat_);
+glm::vec3 exporter_visitor::_mathconv_max_to_glTF::convert_scale(
+    const glm::vec3 &scale_) {
+  // Note: the sign never change.
+  return glm::vec3(scale_.x, scale_.z, scale_.y);
+}
+
+glm::quat exporter_visitor::_mathconv_max_to_glTF::convert_rotation(
+    const glm::quat &quat_) {
+  // assert(glm::length(quat_) == 1);
+  // glTF use right-hand rule, iGame(Max) use left-hand.
   auto angle = glm::angle(quat_);
   auto axis = glm::axis(quat_);
-  return glm::angleAxis(-angle, _maxToGLTF(axis));
+  return glm::angleAxis(-angle, convert_point(axis));
 }
 
-glm::mat4 exporter_visitor::_maxToGLTF(const glm::mat4 &matrix_) {
+glm::mat4 exporter_visitor::_mathconv_max_to_glTF::convert_transform(
+    const glm::mat4 &matrix_) {
   auto maxToGLTF = glm::rotate(
       glm::radians(static_cast<glm::mat4::value_type>(90)), glm::vec3(1, 0, 0));
   return glm::inverse(maxToGLTF) * matrix_ * maxToGLTF;
+}
+
+glm::quat exporter_visitor::_mathconv_igame_to_glTF::convert_rotation(
+    const glm::quat &quat_) {
+  // assert(glm::length(quat_) == 1);
+  // glTF use right-hand rule, iGame(Max) use left-hand.
+  auto result = quat_;
+  result.w = -result.w;
+  return result;
 }
 } // namespace fant

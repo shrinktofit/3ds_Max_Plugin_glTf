@@ -1,6 +1,8 @@
 
 #pragma once
 
+#define DEBUG_TPOSE
+
 #include <IGame/IGame.h>
 #include <array>
 #include <charconv>
@@ -14,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <glm/glm.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <gsl/span>
 #include <iskin.h>
 #include <list>
@@ -176,6 +179,10 @@ private:
     glTF::accessor::component_type joint_storage;
     glTF::accessor::component_type weight_storage;
     std::vector<jw_channel> sets;
+#ifdef DEBUG_TPOSE
+    std::vector<glm::mat4> bindposes;
+    std::vector<glm::mat4> joint_transforms;
+#endif
   };
 
   glTF::object_ptr<glTF::node> _exportNode(IGameNode &igame_node_);
@@ -306,43 +313,6 @@ private:
     out_[15] = 1;
   }
 
-  template <typename Out>
-  static void _flatternVec3Array(gsl::span<Point3> values_, Out *out_) {
-    for (decltype(values_.size()) i = 0; i < values_.size(); ++i) {
-      out_[3 * i + 0] = values_[i].x;
-      out_[3 * i + 1] = values_[i].y;
-      out_[3 * i + 2] = values_[i].z;
-    }
-  }
-
-  template <typename Out>
-  static void _flatternQuatArray(gsl::span<Quat> values_, Out *out_) {
-    for (decltype(values_.size()) i = 0; i < values_.size(); ++i) {
-      out_[4 * i + 0] = values_[i].x;
-      out_[4 * i + 1] = values_[i].y;
-      out_[4 * i + 2] = values_[i].z;
-      out_[4 * i + 3] = values_[i].w;
-    }
-  }
-
-  template <typename Out>
-  static void _flatternMat3ArrayAsMat4Array(gsl::span<Quat> values_,
-                                            Out *out_) {
-    for (decltype(values_.size()) i = 0; i < values_.size(); ++i) {
-      out_[4 * i + 0] = values_[i].x;
-      out_[4 * i + 1] = values_[i].y;
-      out_[4 * i + 2] = values_[i].z;
-      out_[4 * i + 3] = values_[i].w;
-    }
-  }
-
-  void _setTrs(glTF::node &node_,
-               const Point3 &t_,
-               const Quat &r_,
-               const Point3 &s_);
-
-  void _setTrs(glTF::node &node_, const Matrix3 &matrix_);
-
   void _setTrs(glTF::node &node_, const GMatrix &matrix_);
 
   glTF::object_ptr<glTF::accessor>
@@ -367,44 +337,6 @@ private:
     return accessor;
   }
 
-  template <typename Ty> void _checkSpanSize(gsl::span<Ty> values_) {
-    if constexpr (std::numeric_limits<decltype(values_)::size_type>::max() >
-                  std::numeric_limits<glTF::accessor::size_type>::max()) {
-      if (values_.size() >
-          std::numeric_limits<glTF::accessor::size_type>::max()) {
-        throw std::overflow_error("Exceeds buffer capacity.");
-      }
-    }
-  }
-
-  glTF::object_ptr<glTF::accessor>
-  _makeSimpleAccessor(gsl::span<Point3> values_) {
-    _checkSpanSize(values_);
-
-    auto accessor = _makeSimpleAccessor(
-        glTF::accessor::type_type::vec3,
-        glTF::accessor::component_type::the_float,
-        static_cast<glTF::accessor::size_type>(values_.size()));
-    _flatternVec3Array(
-        values_,
-        accessor->typed_data<glTF::accessor::component_type::the_float>());
-    return accessor;
-  }
-
-  glTF::object_ptr<glTF::accessor>
-  _makeSimpleAccessor(gsl::span<Quat> values_) {
-    _checkSpanSize(values_);
-
-    auto accessor = _makeSimpleAccessor(
-        glTF::accessor::type_type::vec4,
-        glTF::accessor::component_type::the_float,
-        static_cast<glTF::accessor::size_type>(values_.size()));
-    _flatternQuatArray(
-        values_,
-        accessor->typed_data<glTF::accessor::component_type::the_float>());
-    return accessor;
-  }
-
   static Matrix3 _getLocalNodeTransformMatrix(INode &max_node_,
                                               TimeValue time_);
 
@@ -419,6 +351,14 @@ private:
 
   static glm::mat4 _calculateWorldMatrix(glTF::object_ptr<glTF::node> node_);
 
+  struct _trs {
+    glm::vec3 translation;
+    glm::quat rotation;
+    glm::vec3 scale;
+  };
+
+  static _trs _decomposeTRS(const glm::mat4 &matrix_);
+
   static glm::mat4 _composeTRS(const glm::vec3 &translation_,
                                const glm::quat &rotation_,
                                const glm::vec3 &scale_);
@@ -429,10 +369,18 @@ private:
 
   static glm::quat _toGLM(const Quat &quat_);
 
-  static glm::vec3 _maxToGLTF(const glm::vec3 &vector_);
+  struct _mathconv_max_to_glTF {
+    static glm::vec3 convert_point(const glm::vec3 &point_);
 
-  static glm::quat _maxToGLTF(const glm::quat &quat_);
+    static glm::vec3 convert_scale(const glm::vec3 &scale_);
 
-  static glm::mat4 _maxToGLTF(const glm::mat4 &matrix_);
+    static glm::quat convert_rotation(const glm::quat &quat_);
+
+    static glm::mat4 convert_transform(const glm::mat4 &matrix_);
+  };
+
+  struct _mathconv_igame_to_glTF {
+    static glm::quat convert_rotation(const glm::quat& quat_);
+  };
 };
 } // namespace fant

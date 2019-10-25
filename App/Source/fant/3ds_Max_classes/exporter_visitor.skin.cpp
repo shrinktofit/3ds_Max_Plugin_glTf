@@ -14,6 +14,8 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
   // https://github.com/homer6/c_reading/blob/4dc6b608203bb0a053c703d80b6af5e1141983ab/cat_mother/maxexport/SgUtil.cpp
   auto glTFSkin = _document.factory().make<glTF::skin>();
 
+  auto meshNodeWorldTM = _calculateWorldMatrix(glTF_mesh_node_);
+
   // Bones that affecting vertices.
   auto nBones = igame_skin_.GetTotalBoneCount();
 
@@ -43,16 +45,16 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
     }
     auto glTFBoneNode = rglTFBoneNode->second;
 
-    //auto boneNodeWorldTM = boneNode->GetWorldTM(0);
-    //auto meshNodeWorldTM = igame_node_.GetWorldTM(0);
-    //GMatrix initSkinTM; // Transform mesh to world.
-    //igame_skin_.GetInitSkinTM(initSkinTM);
-    //GMatrix
-    //    initBoneTM; // Bone's world node TM. (equalavent to `boneNodeWorldTM`?)
-    //bool successed = igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
-    //GMatrix inverseInitBoneTM = GMatrix(initBoneTM).Inverse();
+    // auto boneNodeWorldTM = boneNode->GetWorldTM(0);
+    // auto meshNodeWorldTM = igame_node_.GetWorldTM(0);
+    // GMatrix initSkinTM; // Transform mesh to world.
+    // igame_skin_.GetInitSkinTM(initSkinTM);
+    // GMatrix
+    //    initBoneTM; // Bone's world node TM. (equalavent to
+    //    `boneNodeWorldTM`?)
+    // bool successed = igame_skin_.GetInitBoneTM(boneNode, initBoneTM);
+    // GMatrix inverseInitBoneTM = GMatrix(initBoneTM).Inverse();
 
-    auto meshNodeWorldTM = _calculateWorldMatrix(glTF_mesh_node_);
     auto initBoneTM = _calculateWorldMatrix(glTFBoneNode);
     auto inverseInitBoneTM = glm::inverse(initBoneTM);
 
@@ -63,7 +65,8 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
     glm::quat r;
     glm::vec3 skew;
     glm::vec4 per;
-    auto decomposeresult = glm::decompose(inverseBindMatrix, s,r, t, skew, per);
+    auto decomposeresult =
+        glm::decompose(inverseBindMatrix, s, r, t, skew, per);
     std::cout << decomposeresult;
 
     inverseBindMatrices[iBone] = inverseBindMatrix;
@@ -145,7 +148,9 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
         sets[iset].joints.get())[4 * vertex_index_ + iinflu] = boneArrayIndex;
 
     auto weight = igame_skin_.GetWeight(vertex_index_, affecting_bone_index_);
-    assert(weight >= 0);
+    if (weight <= 0) {
+      return;
+    }
     reinterpret_cast<WeightStorage *>(
         sets[iset].weights.get())[4 * vertex_index_ + iinflu] = weight;
   };
@@ -174,6 +179,9 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
   vertexSkinData.joint_storage = glTF::accessor::component_type::unsigned_short;
   vertexSkinData.weight_storage = glTF::accessor::component_type::the_float;
   vertexSkinData.sets = std::move(sets);
+#ifdef DEBUG_TPOSE
+  vertexSkinData.bindposes = inverseBindMatrices;
+#endif
   return {glTFSkin, std::move(vertexSkinData)};
 }
 } // namespace fant

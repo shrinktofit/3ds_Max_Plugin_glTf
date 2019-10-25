@@ -1,42 +1,28 @@
 
 #include <fant/3ds_Max_classes/exporter_visitor.h>
+#include <glm/gtc/constants.hpp>
 
 namespace fant {
-void exporter_visitor::_setTrs(glTF::node &node_,
-                               const Point3 &t_,
-                               const Quat &r_,
-                               const Point3 &s_) {
-  if (t_ != Point3::Origin) {
-    node_.position({t_.x, t_.y, t_.z});
-  }
-
-  if (s_ != Point3(1, 1, 1)) {
-    node_.scale({s_.x, s_.y, s_.z});
-  }
-
-  if (!r_.IsIdentity()) {
-    auto normr = Quat(r_);
-    normr.Normalize();
-    normr = _igameToGlTF(normr);
-    node_.rotation({-normr.x, -normr.y, normr.z, normr.w});
-  }
-}
-
-void exporter_visitor::_setTrs(glTF::node &node_, const Matrix3 &matrix_) {
-  Point3 t;
-  Point3 s;
-  Quat r;
-  DecomposeMatrix(matrix_, t, r, s);
-  _setTrs(node_, t, r, s);
-}
-
 void exporter_visitor::_setTrs(glTF::node &node_, const GMatrix &matrix_) {
-  _setTrs(node_, (matrix_.Translation()), (matrix_.Rotation()),
-          (matrix_.Scaling()));
-  return;
-  _setTrs(node_, _convertIntoGlTFAxisSystem(matrix_.Translation()),
-          _convertIntoGlTFAxisSystem(matrix_.Rotation()),
-          _convertIntoGlTFAxisSystem(matrix_.Scaling()));
+  // Babylon exporter says that "use babylon decomposition, as 3ds max built-in
+  // values are no correct". For some model, it's true: the `matrix_.Rotation()`
+  // will return quat(0, vec3(1, 0, 0)) for non-rotated node.
+  auto glmTM = _toGLM(matrix_);
+  auto [translation, rotation, scale] = _decomposeTRS(glmTM);
+
+  if (translation != glm::zero<glm::vec3>()) {
+    node_.position({translation.x, translation.y, translation.z});
+  }
+
+  if (scale != glm::vec3(1, 1, 1)) {
+    node_.scale({scale.x, scale.y, scale.z});
+  }
+
+  if (rotation != glm::identity<glm::quat>()) {
+    auto normr = glm::normalize(rotation);
+    normr = _mathconv_igame_to_glTF::convert_rotation(normr);
+    node_.rotation({normr.x, normr.y, normr.z, normr.w});
+  }
 }
 
 glTF::object_ptr<glTF::node>
