@@ -22,6 +22,9 @@ exporter_visitor::_exportSkin(IGameNode &igame_node_,
   // Bones that assigned to the skin modifier.
   auto nSkinBones = igame_skin_.GetTotalSkinBoneCount();
 
+  GMatrix initSkinTM; // Transform mesh to world.
+  igame_skin_.GetInitSkinTM(initSkinTM);
+
   std::vector<std::string> boneNames(nBones);
   for (std::remove_const_t<decltype(nBones)> iBone = 0; iBone < nBones;
        ++iBone) {

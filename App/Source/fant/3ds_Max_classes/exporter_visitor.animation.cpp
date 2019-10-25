@@ -41,12 +41,12 @@ void exporter_visitor::_bakeAnimation(IGameNode &igame_node_,
   }
 
   /// DEBUG
-  for (decltype(localNodeTMs.size()) iTM = 0; iTM < localNodeTMs.size();
+  /*for (decltype(localNodeTMs.size()) iTM = 0; iTM < localNodeTMs.size();
     ++iTM) {
     auto [translation, rotation, scale] =
       _decomposeTRS(_toGLM(localNodeTMs[iTM]));
     rotations[iTM] = _mathconv_igame_to_glTF::convert_rotation(rotation);
-  }
+  }*/
 
   if (!std::all_of(positions.begin() + 1, positions.end(),
                    [&](const auto &position_) {
