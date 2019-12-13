@@ -4,6 +4,7 @@
 #include <charconv>
 #include <fant/3ds_Max_classes/export_settings.h>
 #include <fant/3ds_Max_classes/exporter.h>
+#include <fant/3ds_Max_classes/exporter_ui.h>
 #include <fant/3ds_Max_classes/exporter_visitor.h>
 
 namespace fant {
@@ -97,6 +98,7 @@ void do_export(const MCHAR *name,
                Interface *i,
                BOOL suppressPrompts,
                DWORD options) {
+  open_export_dialog();
   auto path = std::filesystem::path(name);
 
   export_settings settings;

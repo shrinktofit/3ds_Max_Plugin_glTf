@@ -31,18 +31,13 @@ function normalizePath([string]$path) {
     }
 }
 
-$outputDir = "./.3dsmaxstuffs"
-if (-Not (Test-Path $outputDir)) {
-    New-Item $outputDir -ItemType Directory
-}
-
 $sdkHome = find3dsMaxSDK
 if ($null -eq $sdkHome) {
     Write-Error "3DS_MAX_SDK_HOME not found."
     exit 1
 }
 $sdkHome = normalizePath -Path $sdkHome
-$sdkHome | Out-File -FilePath "$outputDir\3DS_MAX_SDK_HOME" -NoNewline
+$sdkHome = $sdkHome.Replace("\", "\\")
 
 $maxHome = find3dsMax
 if ($null -eq $maxHome) {
@@ -50,4 +45,9 @@ if ($null -eq $maxHome) {
     exit 1
 }
 $maxHome = normalizePath -Path $maxHome
-$maxHome | Out-File -FilePath "$outputDir\3DS_Max_HOME" -NoNewline
+$maxHome = $maxHome.Replace("\", "\\")
+
+@"
+set (ASDK_3DS_MAX_SDK_HOME "$($sdkHome)")
+set (ASDK_3DS_MAX_HOME "$($maxHome)")
+"@ | Out-File -FilePath "./3dsMax.CMakeLists.txt"
