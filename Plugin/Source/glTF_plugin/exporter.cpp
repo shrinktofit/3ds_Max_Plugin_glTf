@@ -68,8 +68,6 @@ static glTF_export_dialog_interface_t glTF_export_dialog_interface(
     p_end); // indicates parameter specification ends
 
 void open_export_dialog(HWND max_hwmd_) {
-  auto iface = GetCOREInterface(GLTF_EXPORT_DIALOG_INTERFACE_ID);
-  std::cout << iface;
   auto uiScript = _T(R"xxx(
 (
 	rollout glTFExportDialog "glTF Exporter" (
