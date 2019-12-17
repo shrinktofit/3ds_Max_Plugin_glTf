@@ -1,10 +1,115 @@
 
 #include "resource.h"
 #include <apricot/exporter.h>
+#include <apricot/exporter/export_settings.h>
 #include <array>
+#include <condition_variable>
 #include <glTF_plugin/exporter.h>
 #include <glTF_plugin/utilities/win32/get_string_resource.h>
 #include <glTF_plugin/utilities/win32/instance.h>
+#include <ifnpub.h>
+#include <iostream>
+#include <maxscript/foundation/WindowStream.h>
+#include <maxscript/macros/define_instantiation_functions.h>
+#include <maxscript/maxscript.h>
+#include <mutex>
+#include <optional>
+#include <tchar.h>
+
+#define GLTF_EXPORT_DIALOG_INTERFACE_ID Interface_ID(0x38646bc2, 0x618d686b)
+
+class glTF_export_dialog_interface_t : public FPStaticInterface {
+public:
+  enum class function_id {
+    id_get_dialog_hwnd,
+    close,
+  };
+
+  virtual HWND get_dialog_hwnd() {
+    return dialog_hwnd;
+  }
+
+  virtual void close() {
+    closed = true;
+  }
+
+  bool closed = true;
+
+  HWND dialog_hwnd = nullptr;
+
+  DECLARE_DESCRIPTOR(glTF_export_dialog_interface_t);
+  BEGIN_FUNCTION_MAP
+  FN_0(function_id::id_get_dialog_hwnd, TYPE_HWND, get_dialog_hwnd)
+  VFN_0(function_id::close, close)
+  END_FUNCTION_MAP
+};
+
+static glTF_export_dialog_interface_t glTF_export_dialog_interface(
+    GLTF_EXPORT_DIALOG_INTERFACE_ID, // id
+    _T("glTFExportDialogInterface"), // name
+    IDS_GLTF_EXPORTER_AUTHOR_NAME,   // description resource id
+    NULL,                            // class description
+    FP_CORE,                         // flags
+    // close
+    glTF_export_dialog_interface_t::function_id::close, // method id
+    _T("close"),                                        // method name
+    0,
+    TYPE_VOID, // return type
+    0,
+    0, // parameter count
+       // getDialogHwnd
+    glTF_export_dialog_interface_t::function_id::id_get_dialog_hwnd, // method
+                                                                     // id
+    _T("getDialogHwnd"), // method name
+    0,
+    TYPE_HWND, // return type
+    0,
+    0,      // parameter count
+    p_end); // indicates parameter specification ends
+
+void open_export_dialog(HWND max_hwmd_) {
+  auto iface = GetCOREInterface(GLTF_EXPORT_DIALOG_INTERFACE_ID);
+  std::cout << iface;
+  auto uiScript = _T(R"xxx(
+(
+	rollout glTFExportDialog "glTF Exporter" (
+		dropdownlist dropdownlistFormat "Format" items:#("Mixed(.gltf + .bin)", "Binary(.glb)", "JSON(.gltf)")
+		dropdownlist dropdownlistIndexType "Index type" items:#("At least 8 bits", "At least 16 bits", "8 bits", "16 bits", "32 bits")
+		dropdownlist dropdownlistImageStorage "Image storage" items:#("Standalone", "Embedded as binary", "Embedded as URI")
+
+		button buttonExport "Export"
+		button buttonCancel "Cancel"
+		
+		on buttonExport pressed do (
+      glTFExportDialogInterface.close()
+			destroydialog glTFExportDialog
+		)
+		
+		on buttonCancel pressed do (
+      glTFExportDialogInterface.close()
+			destroydialog glTFExportDialog
+		)
+	)
+	glTFExportDialogInstance = createDialog glTFExportDialog modal
+)
+)xxx");
+
+  glTF_export_dialog_interface.closed = false;
+
+  FPValue fpHwnd;
+  ExecuteMAXScriptScript(uiScript,
+                         0, // quietErrors
+                         &fpHwnd);
+
+  MSG message;
+  HWND hwnd = nullptr;
+  while (!glTF_export_dialog_interface.closed) {
+    if (GetMessage(&message, hwnd, 0, 0)) {
+      TranslateMessage(&message);
+      DispatchMessage(&message);
+    }
+  }
+}
 
 namespace plugin {
 enum class glTf_extension {
@@ -108,7 +213,12 @@ int glTF_exporter::DoExport(const MCHAR *name,
                             Interface *i,
                             BOOL suppressPrompts,
                             DWORD options) {
-  return _impl->exporter.do_export(name, ei, i, suppressPrompts, options);
+  if (true || !suppressPrompts) {
+    open_export_dialog(i->GetMAXHWnd());
+  }
+  apricot::export_settings settings;
+  return _impl->exporter.do_export(name, ei, i, suppressPrompts, options,
+                                   settings);
 }
 
 BOOL glTF_exporter::SupportsOptions(int ext, DWORD options) {

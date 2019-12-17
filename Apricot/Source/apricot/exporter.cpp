@@ -2,7 +2,6 @@
 #include <apricot/exporter.h>
 #include <apricot/exporter/export_settings.h>
 #include <apricot/exporter/exporter.impl.h>
-#include <apricot/exporter/ui.h>
 #include <apricot/glTF.h>
 #include <apricot/utilities/uri_utility.h>
 #include <fstream>
@@ -14,10 +13,10 @@ int exporter::do_export(const MCHAR *name,
                         ExpInterface *ei,
                         Interface *i,
                         BOOL suppressPrompts,
-                        DWORD options) {
+                        DWORD options,
+                        export_settings settings_) {
   namespace fs = std::filesystem;
 
-  open_export_dialog();
   auto path = std::filesystem::path(name);
 
   export_settings settings;
