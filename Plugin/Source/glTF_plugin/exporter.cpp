@@ -69,27 +69,16 @@ static glTF_export_dialog_interface_t glTF_export_dialog_interface(
 
 void open_export_dialog(HWND max_hwmd_) {
   auto uiScript = _T(R"xxx(
-(
-	rollout glTFExportDialog "glTF Exporter" (
-		dropdownlist dropdownlistFormat "Format" items:#("Mixed(.gltf + .bin)", "Binary(.glb)", "JSON(.gltf)")
-		dropdownlist dropdownlistIndexType "Index type" items:#("At least 8 bits", "At least 16 bits", "8 bits", "16 bits", "32 bits")
-		dropdownlist dropdownlistImageStorage "Image storage" items:#("Standalone", "Embedded as binary", "Embedded as URI")
+exportDialogHtmlFilePath = "X:\\Repos\\Leslie\\3ds_Max_Plugin_glTf\\Plugin\\Static\\export-dialog.html"
+exportDialogHtml = (dotnetClass "System.IO.File").ReadAllText exportDialogHtmlFilePath
 
-		button buttonExport "Export"
-		button buttonCancel "Cancel"
-		
-		on buttonExport pressed do (
-      glTFExportDialogInterface.close()
-			destroydialog glTFExportDialog
-		)
-		
-		on buttonCancel pressed do (
-      glTFExportDialogInterface.close()
-			destroydialog glTFExportDialog
-		)
-	)
-	glTFExportDialogInstance = createDialog glTFExportDialog modal
-)
+hBrowser = dotNetObject "System.Windows.Forms.WebBrowser"
+hBrowser.DocumentText = exportDialogHtml
+
+hForm = dotNetObject "System.Windows.Forms.Form"
+hForm.controls.add hBrowser
+hForm.topmost = true
+hForm.show()
 )xxx");
 
   glTF_export_dialog_interface.closed = false;
