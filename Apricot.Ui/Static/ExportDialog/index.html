@@ -1,10 +1,11 @@
+<!DOCTYPE html>
 <html>
 
 <head>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" /> 
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href="./external/bootstrap.min.css">
+    <script src="./external/jquery.min.js"></script>
+    <script src="./external/bootstrap.min.js"></script>
 </head>
 
 <body>
@@ -134,12 +135,22 @@
             </div>
         </div>
 
+        <script>
+            function onExportButtonClicked() {
+                window.external.InteropExport();
+            }
+
+            function onCancelButtonClicked() {
+                window.external.InteropCancel();
+            }
+        </script>
+
+
         <div>
-            <button>Export</button>
-            <button>Cancel</button>
+            <button onclick="onExportButtonClicked()">Export</button>
+            <button onclick="onCancelButtonClicked()">Cancel</button>
         </div>
     </div>
-
 </body>
 
 </html>

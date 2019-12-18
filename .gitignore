@@ -10,3 +10,7 @@ build/
 3dsMax.CMakeLists.txt
 
 *.aps
+
+Apricot.Ui/obj/
+
+Apricot.Ui/bin/

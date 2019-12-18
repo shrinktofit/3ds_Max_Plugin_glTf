@@ -67,18 +67,14 @@ static glTF_export_dialog_interface_t glTF_export_dialog_interface(
     0,      // parameter count
     p_end); // indicates parameter specification ends
 
-void open_export_dialog(HWND max_hwmd_) {
+void open_export_dialog() {
   auto uiScript = _T(R"xxx(
-exportDialogHtmlFilePath = "X:\\Repos\\Leslie\\3ds_Max_Plugin_glTf\\Plugin\\Static\\export-dialog.html"
-exportDialogHtml = (dotnetClass "System.IO.File").ReadAllText exportDialogHtmlFilePath
-
-hBrowser = dotNetObject "System.Windows.Forms.WebBrowser"
-hBrowser.DocumentText = exportDialogHtml
-
-hForm = dotNetObject "System.Windows.Forms.Form"
-hForm.controls.add hBrowser
-hForm.topmost = true
-hForm.show()
+dotnet.loadAssembly @"X:\Repos\Leslie\3ds_Max_Plugin_glTf\Apricot.Ui\bin\Debug\netstandard2.0\Apricot.Ui.dll"
+parentWindow = dotNetObject "Apricot.Ui.Win32WindowWrapper" (dotNet.ValueToDotNetObject (windows.getMAXHWND()) (dotNetClass "System.Intptr"))
+exportDialog = dotNetObject "Apricot.Ui.ExportDialog" @"X:\Repos\Leslie\3ds_Max_Plugin_glTf\Apricot.Ui\Static\ExportDialog"
+exportDialog.owner = parentWindow
+exportDialog.Show()
+if exportDialog.ShouldExport then print "Do Export" else print "Do Cancel"
 )xxx");
 
   glTF_export_dialog_interface.closed = false;
@@ -88,14 +84,14 @@ hForm.show()
                          0, // quietErrors
                          &fpHwnd);
 
-  MSG message;
+  /*MSG message;
   HWND hwnd = nullptr;
   while (!glTF_export_dialog_interface.closed) {
     if (GetMessage(&message, hwnd, 0, 0)) {
       TranslateMessage(&message);
       DispatchMessage(&message);
     }
-  }
+  }*/
 }
 
 namespace plugin {
@@ -201,7 +197,7 @@ int glTF_exporter::DoExport(const MCHAR *name,
                             BOOL suppressPrompts,
                             DWORD options) {
   if (true || !suppressPrompts) {
-    open_export_dialog(i->GetMAXHWnd());
+    open_export_dialog();
   }
   apricot::export_settings settings;
   return _impl->exporter.do_export(name, ei, i, suppressPrompts, options,
