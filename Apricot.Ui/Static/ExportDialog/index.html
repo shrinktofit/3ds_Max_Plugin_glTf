@@ -2,39 +2,63 @@
 <html>
 
 <head>
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" /> 
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta http-equiv="cache-control" content="no-cache">
     <link rel="stylesheet" href="./external/bootstrap.min.css">
     <script src="./external/jquery.min.js"></script>
+    <script src="./external/jquery.i18n.min.js"></script>
+    <script src="./external/jquery.i18n.messagestore.min.js"></script>
+    <script>
+        var localeId = 'zh';
+        $.i18n({ locale: localeId });
+        try {
+            // If We are in WebBrowser, we have to load file using our own API.
+            // Because cross-domain is not supported by WebBrowser.
+            var messagesFile = window.external.InteropFetchAppTextFile('Static/ExportDialog/i18n/' + localeId + '.json');
+            // window.external.InteropDebugPrint(JSON.stringify(JSON.parse(messagesFile), undefined, 2));
+            var i18nconfig = {};
+			i18nconfig[localeId] = JSON.parse(messagesFile);
+            $.i18n().load(i18nconfig);
+        } catch (error) {
+            $.i18n().load();
+        }
+        $(document).ready(function() {
+            $('body').i18n();
+        });
+    </script>
     <script src="./external/bootstrap.min.js"></script>
+
 </head>
 
 <body>
     <div class="container">
+        <h1 data-i18n="root-title"></h1>
+        <label> v1.0.1 </label>
         <div class="panel-group">
             <!-- Include -->
             <div class="panel panel-default">
                 <div class="panel-heading">
                     <h4 class="panel-title">
-                        <a data-toggle="collapse" href="#includeCollapse">Include</a>
+                        <a data-toggle="collapse" href="#includeCollapse" data-i18n="include-panel-title"></a>
                     </h4>
                 </div>
                 <div id="includeCollapse" class="panel-collapse collapse">
                     <div class="panel-body">
                         <div>
                             <input type="checkbox" id="includeMeshCheckBox"></input>
-                            <label for="includeMeshCheckBox">Meshes</label>
+                            <label for="includeMeshCheckBox" data-i18n="include-panel-body-mesh-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeAnimationCheckBox"></input>
-                            <label for="includeAnimationCheckBox">Animations</label>
+                            <label for="includeAnimationCheckBox" data-i18n="include-panel-body-animation-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeCameraCheckBox"></input>
-                            <label for="includeCameraCheckBox">Cameras</label>
+                            <label for="includeCameraCheckBox" data-i18n="include-panel-body-camera-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeLightCheckBox"></input>
-                            <label for="includeLightCheckBox">Lights</label>
+                            <label for="includeLightCheckBox" data-i18n="include-panel-body-light-label"></label>
                         </div>
                     </div>
                 </div>
@@ -44,28 +68,33 @@
             <div class="panel panel-default">
                 <div class="panel-heading">
                     <h4 class="panel-title">
-                        <a data-toggle="collapse" href="#meshCollapse">Mesh</a>
+                        <a data-toggle="collapse" href="#meshCollapse" data-i18n="mesh-panel-title"></a>
                     </h4>
                 </div>
                 <div id="meshCollapse" class="panel-collapse collapse">
                     <div class="panel-body">
                         <div>
                             <input type="checkbox" id="includeNormalCheckBox"></input>
-                            <label for="includeNormalCheckBox">Normals</label>
+                            <label for="includeNormalCheckBox" data-i18n="mesh-panel-body-normal-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeTangentCheckBox"></input>
-                            <label for="includeTangentCheckBox">Tangents</label>
+                            <label for="includeTangentCheckBox" data-i18n="mesh-panel-body-tangent-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeUVCheckBox"></input>
-                            <label for="includeUVCheckBox">UVs</label>
+                            <label for="includeUVCheckBox" data-i18n="mesh-panel-body-uv-label"></label>
                         </div>
                         <div>
                             <input type="checkbox" id="includeVertexColorCheckBox"></input>
-                            <label for="includeVertexColorCheckBox">Vertex Colors</label>
+                            <label for="includeVertexColorCheckBox" data-i18n="mesh-panel-body-vertex-color-label"></label>
+                        </div>
+                        <div>
+                            <label for="maxAllowedJointsPerVertex" data-i18n="mesh-panel-max-influence-joints-label"></label>
+                            <input type="number" id="maxAllowedJointsPerVertex" min="4", max="12", value="4", step="4"></input>
                         </div>
                     </div>
+
                 </div>
             </div>
 
@@ -73,14 +102,14 @@
             <div class="panel panel-default">
                 <div class="panel-heading">
                     <h4 class="panel-title">
-                        <a data-toggle="collapse" href="#animationCollapse">Animation</a>
+                        <a data-toggle="collapse" href="#animationCollapse" data-i18n="animation-panel-title"></a>
                     </h4>
                 </div>
                 <div id="animationCollapse" class="panel-collapse collapse">
                     <div class="panel-body">
                         <div>
-                            <input type="range" min="1" max="72" class="slider" id="animationBaseSampleInput"></input>
-                            <label for="animationBaseSampleInput">Base Sample</label>
+                            <label for="animationBakeSampleInput" data-i18n="animation-panel-body-bake-sample-label"></label>
+                            <input type="range" min="1" max="72" class="slider" id="animationBakeSampleInput"></input>
                         </div>
                     </div>
                 </div>
@@ -90,14 +119,14 @@
             <div class="panel panel-default">
                 <div class="panel-heading">
                     <h4 class="panel-title">
-                        <a data-toggle="collapse" href="#extensionCollapse">Extensions</a>
+                        <a data-toggle="collapse" href="#extensionCollapse" data-i18n="extensions-panel-title"></a>
                     </h4>
                 </div>
                 <div id="extensionCollapse" class="panel-collapse collapse">
                     <div class="panel-body">
                         <div>
                             <input type="checkbox" id="extensionKhrDracoMeshCompressionInput"></input>
-                            <label for="extensionKhrDracoMeshCompressionInput">KHR Draco Mesh Compression</label>
+                            <label for="extensionKhrDracoMeshCompressionInput" data-i18n="extensions-panel-body-khr-draco-mesh-compression-checkbox"></label>
                         </div>
                     </div>
                 </div>
@@ -107,27 +136,27 @@
             <div class="panel panel-default">
                 <div class="panel-heading">
                     <h4 class="panel-title">
-                        <a data-toggle="collapse" href="#formatCollapse">Format</a>
+                        <a data-toggle="collapse" href="#formatCollapse" data-i18n="format-panel-title"></a>
                     </h4>
                 </div>
                 <div id="formatCollapse" class="panel-collapse collapse">
                     <div class="panel-body">
                         <div>
-                            <label>Format</label>
+                            <label data-i18n="format-panel-format-label"></label>
                             <select name="format">
-                                <option value="mixed">Mixed(.gltf + .bin)</option>
-                                <option value="binary">Binary(.glb)</option>
-                                <option value="json">JSON(.gltf)</option>
+                                <option value="mixed" data-i18n="format-panel-format-choice-mixed"></option>
+                                <option value="binary" data-i18n="format-panel-format-choice-binary"></option>
+                                <option value="json" data-i18n="format-panel-format-choice-json"></option>
                             </select>
                         </div>
                         <div>
-                            <label>Index Type</label>
+                            <label data-i18n="format-panel-index-type-label"></label>
                             <select name="indexType">
-                                <option value="least8">At least 8 bits</option>
-                                <option value="least16">At least 16 bits</option>
-                                <option value="fixed8">8 bits</option>
-                                <option value="fixed16">16 bits</option>
-                                <option value="fixed32">32 bits</option>
+                                <option value="least8" data-i18n="format-panel-index-type-choice-least8"></option>
+                                <option value="least16" data-i18n="format-panel-index-type-choice-least16"></option>
+                                <option value="fixed8" data-i18n="format-panel-index-type-choice-fixed8"></option>
+                                <option value="fixed16" data-i18n="format-panel-index-type-choice-fixed16"></option>
+                                <option value="fixed32" data-i18n="format-panel-index-type-choice-fixed32"></option>
                             </select>
                         </div>
                     </div>
@@ -145,10 +174,9 @@
             }
         </script>
 
-
         <div>
-            <button onclick="onExportButtonClicked()">Export</button>
-            <button onclick="onCancelButtonClicked()">Cancel</button>
+            <button onclick="onExportButtonClicked()" data-i18n="export-button"></button>
+            <button onclick="onCancelButtonClicked()" data-i18n="cancel-button"></button>
         </div>
     </div>
 </body>

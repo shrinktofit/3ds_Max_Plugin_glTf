@@ -1,0 +1,37 @@
+{
+    "root-title": "导出为 glTF",
+
+    "include-panel-title": "包含",
+    "include-panel-body-mesh-label": "网格",
+    "include-panel-body-animation-label": "动画",
+    "include-panel-body-camera-label": "摄像机",
+    "include-panel-body-light-label": "灯光",
+
+    "mesh-panel-title": "网格",
+    "mesh-panel-body-normal-label": "法线",
+    "mesh-panel-body-tangent-label": "切线",
+    "mesh-panel-body-uv-label": "纹理坐标",
+    "mesh-panel-body-vertex-color-label": "顶点色",
+    "mesh-panel-max-influence-joints-label": "最大骨骼影响数",
+
+    "animation-panel-title": "动画",
+    "animation-panel-body-bake-sample-label": "烘焙采样率",
+
+    "extensions-panel-title": "扩展",
+    "extensions-panel-body-khr-draco-mesh-compression-checkbox": "KHR Draco 网格压缩",
+
+    "format-panel-title": "存储",
+    "format-panel-format-label": "格式",
+    "format-panel-format-choice-mixed": "混合（.gltf + .bin）",
+    "format-panel-format-choice-binary": "二进制（.glb）",
+    "format-panel-format-choice-json": "JSON（.gltf）",
+    "format-panel-index-type-label": "顶点索引类型",
+    "format-panel-index-type-choice-least8": "最适",
+    "format-panel-index-type-choice-least16": "最适，但至少双字节",
+    "format-panel-index-type-choice-fixed8": "单字节",
+    "format-panel-index-type-choice-fixed16": "双字节",
+    "format-panel-index-type-choice-fixed32": "四字节",
+
+    "export-button": "导出",
+    "cancel-button": "取消"
+}

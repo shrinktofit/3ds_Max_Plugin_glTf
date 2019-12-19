@@ -1,0 +1,37 @@
+{
+    "root-title": "Export as glTF",
+
+    "include-panel-title": "Include",
+    "include-panel-body-mesh-label": "Meshes",
+    "include-panel-body-animation-label": "Animations",
+    "include-panel-body-camera-label": "Cameras",
+    "include-panel-body-light-label": "Lights",
+
+    "mesh-panel-title": "Mesh",
+    "mesh-panel-body-normal-label": "Normals",
+    "mesh-panel-body-tangent-label": "Tangents",
+    "mesh-panel-body-uv-label": "UVs",
+    "mesh-panel-body-vertex-color-label": "Vertex colors",
+    "mesh-panel-max-influence-joints-label": "Max joint influences",
+
+    "animation-panel-title": "Animation",
+    "animation-panel-body-bake-sample-label": "Bake sample",
+
+    "extensions-panel-title": "Extensions",
+    "extensions-panel-body-khr-draco-mesh-compression-checkbox": "KHR Draco Mesh Compression",
+
+    "format-panel-title": "Storage",
+    "format-panel-format-label": "Format",
+    "format-panel-format-choice-mixed": "Mixed(.gltf + .bin)",
+    "format-panel-format-choice-binary": "Binary(.glb)",
+    "format-panel-format-choice-json": "JSON(.gltf)",
+    "format-panel-index-type-label": "Vertex index type",
+    "format-panel-index-type-choice-least8": "Fitness first",
+    "format-panel-index-type-choice-least16": "Fitness first, but 2 bytes at least",
+    "format-panel-index-type-choice-fixed8": "1 byte",
+    "format-panel-index-type-choice-fixed16": "2 bytes",
+    "format-panel-index-type-choice-fixed32": "4 bytes",
+
+    "export-button": "Export",
+    "cancel-button": "Cancel"
+}

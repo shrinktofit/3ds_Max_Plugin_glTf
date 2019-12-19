@@ -16,6 +16,7 @@ namespace Apricot.Ui {
     }
 
     public class ExportDialog {
+        private string _appRoot;
         private Form _form;
         private WebBrowser _browser;
         private bool _shouldExport = false;
@@ -23,7 +24,7 @@ namespace Apricot.Ui {
 
         public Win32WindowWrapper owner = null;
 
-        public ExportDialog(string rootDir) {
+        public ExportDialog() {
             _browser = new WebBrowser();
             _browser.Dock = DockStyle.Fill;
             _browser.IsWebBrowserContextMenuEnabled = false;
@@ -36,12 +37,18 @@ namespace Apricot.Ui {
             _form.ShowInTaskbar = false;
             _form.Controls.Add(_browser);
 
-            var indexFilePath = Path.Combine(rootDir, "index.html");
+            var appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().CodeBase);
+            _appRoot = new Uri(appDir).LocalPath;
+            var indexFilePath = Path.Combine(appDir, "Static", "ExportDialog", "index.html");
             var indexUrl = new Uri(indexFilePath);
             _browser.Navigate(indexUrl);
             _browser.DocumentCompleted += delegate(object sender, WebBrowserDocumentCompletedEventArgs e) {
                 System.Console.WriteLine("Document loaded.");
             };
+        }
+
+        public void InteropDebugPrint(string message) {
+            Console.WriteLine(message);
         }
 
         public void InteropExport() {
@@ -51,6 +58,13 @@ namespace Apricot.Ui {
 
         public void InteropCancel() {
             _form.Close();
+        }
+
+        public string InteropFetchAppTextFile(string path) {
+            var file = Path.Combine(_appRoot, Path.Combine(path.Split('/')));
+            Console.WriteLine("Fetch {0}", path);
+            var result = System.IO.File.ReadAllText(file);
+            return result;
         }
 
         public string Settings {

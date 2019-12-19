@@ -71,7 +71,7 @@ void open_export_dialog() {
   auto uiScript = _T(R"xxx(
 dotnet.loadAssembly @"X:\Repos\Leslie\3ds_Max_Plugin_glTf\Apricot.Ui\bin\Debug\netstandard2.0\Apricot.Ui.dll"
 parentWindow = dotNetObject "Apricot.Ui.Win32WindowWrapper" (dotNet.ValueToDotNetObject (windows.getMAXHWND()) (dotNetClass "System.Intptr"))
-exportDialog = dotNetObject "Apricot.Ui.ExportDialog" @"X:\Repos\Leslie\3ds_Max_Plugin_glTf\Apricot.Ui\Static\ExportDialog"
+exportDialog = dotNetObject "Apricot.Ui.ExportDialog"
 exportDialog.owner = parentWindow
 exportDialog.Show()
 if exportDialog.ShouldExport then print "Do Export" else print "Do Cancel"
