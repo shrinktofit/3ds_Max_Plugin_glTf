@@ -9,22 +9,24 @@
     <script src="./external/jquery.i18n.min.js"></script>
     <script src="./external/jquery.i18n.messagestore.min.js"></script>
     <script>
-        var localeId = 'zh';
-        $.i18n({ locale: localeId });
-        try {
-            // If We are in WebBrowser, we have to load file using our own API.
-            // Because cross-domain is not supported by WebBrowser.
-            var messagesFile = window.external.InteropFetchAppTextFile('Static/ExportDialog/i18n/' + localeId + '.json');
-            // window.external.InteropDebugPrint(JSON.stringify(JSON.parse(messagesFile), undefined, 2));
-            var i18nconfig = {};
-			i18nconfig[localeId] = JSON.parse(messagesFile);
-            $.i18n().load(i18nconfig);
-        } catch (error) {
-            $.i18n().load();
-        }
-        $(document).ready(function() {
-            $('body').i18n();
-        });
+        (function() {
+            var localeId = 'zh';
+            $.i18n({ locale: localeId });
+            try {
+                // If We are in WebBrowser, we have to load file using our own API.
+                // Because cross-domain is not supported by WebBrowser.
+                var messagesFile = window.external.InteropFetchAppTextFile('Static/ExportDialog/i18n/' + localeId + '.json');
+                // window.external.InteropDebugPrint(JSON.stringify(JSON.parse(messagesFile), undefined, 2));
+                var i18nconfig = {};
+                i18nconfig[localeId] = JSON.parse(messagesFile);
+                $.i18n().load(i18nconfig);
+            } catch (error) {
+                $.i18n().load();
+            }
+            $(document).ready(function() {
+                $('body').i18n();
+            });
+        })();
     </script>
     <script src="./external/bootstrap.min.js"></script>
 
@@ -90,8 +92,8 @@
                             <label for="includeVertexColorCheckBox" data-i18n="mesh-panel-body-vertex-color-label"></label>
                         </div>
                         <div>
-                            <label for="maxAllowedJointsPerVertex" data-i18n="mesh-panel-max-influence-joints-label"></label>
-                            <input type="number" id="maxAllowedJointsPerVertex" min="4", max="12", value="4", step="4"></input>
+                            <label for="apricotMaxAllowedJointsPerVertex" data-i18n="mesh-panel-max-influence-joints-label"></label>
+                            <input type="number" id="apricotMaxAllowedJointsPerVertex" min="4", max="12", value="4", step="4"></input>
                         </div>
                     </div>
 
@@ -143,7 +145,7 @@
                     <div class="panel-body">
                         <div>
                             <label data-i18n="format-panel-format-label"></label>
-                            <select name="format">
+                            <select name="format" id="apricotFormat">
                                 <option value="mixed" data-i18n="format-panel-format-choice-mixed"></option>
                                 <option value="binary" data-i18n="format-panel-format-choice-binary"></option>
                                 <option value="json" data-i18n="format-panel-format-choice-json"></option>
@@ -151,7 +153,7 @@
                         </div>
                         <div>
                             <label data-i18n="format-panel-index-type-label"></label>
-                            <select name="indexType">
+                            <select name="indexType" id="apricotIndexType">
                                 <option value="least8" data-i18n="format-panel-index-type-choice-least8"></option>
                                 <option value="least16" data-i18n="format-panel-index-type-choice-least16"></option>
                                 <option value="fixed8" data-i18n="format-panel-index-type-choice-fixed8"></option>
@@ -166,11 +168,35 @@
 
         <script>
             function onExportButtonClicked() {
+                updateSettings();
                 window.external.InteropExport();
             }
 
             function onCancelButtonClicked() {
+                updateSettings();
                 window.external.InteropCancel();
+            }
+
+            function updateSettings() {
+                var settings = {};
+
+                /** @type {HTMLInputElement}  */
+                var eMaxJointsPerVertex = document.getElementById('apricotMaxAllowedJointsPerVertex');
+                settings.maxJointsPerVertex = getValueAsNumber(eMaxJointsPerVertex);
+
+                /** @type {HTMLSelectElement} */
+                var eFormat = document.getElementById('apricotFormat');
+                settings.format = eFormat.value;
+
+                /** @type {HTMLSelectElement} */
+                var eIndexType = document.getElementById('apricotIndexType');
+                settings.indexType = eIndexType.value;
+
+                window.external.InteropUpdateSettings(JSON.stringify(settings, undefined, 2));
+            }
+
+            function getValueAsNumber(inputElement) {
+                return parseInt(inputElement.value);
             }
         </script>
 

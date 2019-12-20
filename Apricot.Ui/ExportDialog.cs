@@ -51,6 +51,10 @@ namespace Apricot.Ui {
             Console.WriteLine(message);
         }
 
+        public void InteropUpdateSettings(string settingsJson) {
+            _settings = settingsJson;
+        }
+
         public void InteropExport() {
             _shouldExport = true;
             _form.Close();
@@ -67,8 +71,13 @@ namespace Apricot.Ui {
             return result;
         }
 
-        public string Settings {
-            get { return _settings;  }
+        public string Result {
+            get {
+                return string.Format(@"
+{{
+  code: {0},
+  settings: {1}
+}}", _shouldExport ? 1 : 0, _settings);  }
         }
         
         public bool ShouldExport
