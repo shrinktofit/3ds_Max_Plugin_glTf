@@ -9,8 +9,6 @@
 #include <glTF_plugin/utilities/win32/instance.h>
 #include <ifnpub.h>
 #include <iostream>
-#include <maxscript/foundation/WindowStream.h>
-#include <maxscript/macros/define_instantiation_functions.h>
 #include <maxscript/maxscript.h>
 #include <mutex>
 #include <optional>
@@ -200,6 +198,10 @@ int glTF_exporter::DoExport(const MCHAR *name,
     open_export_dialog();
   }
   apricot::export_settings settings;
+  settings.format = apricot::export_settings::format_t::json;
+  settings.index_type = apricot::export_settings::index_type_t::least_u8;
+  settings.image_storage =
+      apricot::export_settings::image_storage_t::standalone;
   return _impl->exporter.do_export(name, ei, i, suppressPrompts, options,
                                    settings);
 }

@@ -54,12 +54,24 @@ class exporter_impl {
 
 public:
   exporter_impl(Interface &max_interface_,
-                   glTF::document &document_,
-                   const export_settings &settings_,
-                   IScene &scene_);
+                glTF::document &document_,
+                const export_settings &settings_,
+                IScene &scene_);
 
 private:
   struct _immediate_mesh {
+    constexpr static auto joint_storage =
+        glTF::accessor::component_type::unsigned_short;
+
+    using joint_storage_type =
+        glTF::accessor::component_storage_t<joint_storage>;
+
+    constexpr static auto weight_storage =
+        glTF::accessor::component_type::the_float;
+
+    using weight_storage_type =
+        glTF::accessor::component_storage_t<weight_storage>;
+
     std::u8string name;
     struct vertex_list {
     public:
@@ -71,16 +83,20 @@ private:
       using vertex_count_type = glTF::buffer::size_type;
 
       struct channel_type {
+        using element_size_type = unsigned;
         const glTF::accessor::type_type type;
         const glTF::accessor::component_type component;
+        const element_size_type element_size;
         std::unique_ptr<std::byte[]> data;
 
         channel_type(glTF::accessor::type_type type_,
                      glTF::accessor::component_type component_,
+                     element_size_type element_size_,
                      vertex_count_type vertex_count_)
-            : type(type_), component(component_),
+            : type(type_), component(component_), element_size(element_size_),
               _attributeBytes(glTF::accessor::required_bytes(component_) *
-                              glTF::accessor::required_components(type_)) {
+                              glTF::accessor::required_components(type_) *
+                              element_size_) {
           data = std::make_unique<std::byte[]>(_attributeBytes * vertex_count_);
         }
 
@@ -111,13 +127,16 @@ private:
         return _channels.size();
       }
 
-      std::byte *add_channel(std::u8string_view channel_name_,
-                             glTF::accessor::type_type type_,
-                             glTF::accessor::component_type component_) {
+      std::byte *
+      add_channel(std::u8string_view channel_name_,
+                  glTF::accessor::type_type type_,
+                  glTF::accessor::component_type component_,
+                  channel_type::element_size_type element_size_ = 1) {
         auto attributesByte = glTF::accessor::required_bytes(component_) *
                               glTF::accessor::required_components(type_);
-        auto r = _channels.emplace(channel_name_,
-                                   channel_type{type_, component_, _nVertices});
+        auto r = _channels.emplace(
+            channel_name_,
+            channel_type{type_, component_, element_size_, _nVertices});
         return r.first->second.data.get();
       }
 
@@ -166,15 +185,39 @@ private:
     }
   };
 
-  struct _vertex_skin_data {
-    struct jw_channel {
-      std::unique_ptr<std::byte[]> joints;
-      std::unique_ptr<std::byte[]> weights;
-    };
+  struct skin_statistics {
+    using influence_size_type =
+        _immediate_mesh::vertex_list::channel_type::element_size_type;
 
-    glTF::accessor::component_type joint_storage;
-    glTF::accessor::component_type weight_storage;
-    std::vector<jw_channel> sets;
+    using vertex_count_type = _immediate_mesh::vertex_list::vertex_count_type;
+
+    using joint_storage_type = _immediate_mesh::joint_storage_type;
+
+    using weight_storage_type = _immediate_mesh::weight_storage_type;
+
+    skin_statistics(influence_size_type influence_count_,
+                    vertex_count_type vertex_count_)
+        : influence_count(influence_count_),
+          joint_channel(std::make_unique<joint_storage_type[]>(
+              influence_count_ * vertex_count_)),
+          weight_channel(std::make_unique<weight_storage_type[]>(
+              influence_count_ * vertex_count_)) {
+    }
+
+    void set_influence(vertex_count_type vertex_index_,
+                       influence_size_type influnce_index_,
+                       joint_storage_type joint_,
+                       weight_storage_type weight_) {
+      auto i = influence_count * vertex_index_ + influnce_index_;
+      joint_channel[i] = joint_;
+      weight_channel[i] = weight_;
+    }
+
+    const _immediate_mesh::vertex_list::channel_type::element_size_type
+        influence_count;
+    const std::unique_ptr<_immediate_mesh::joint_storage_type[]> joint_channel;
+    const std::unique_ptr<_immediate_mesh::weight_storage_type[]>
+        weight_channel;
 #ifdef DEBUG_TPOSE
     std::vector<glm::mat4> bindposes;
     std::vector<glm::mat4> joint_transforms;
@@ -186,7 +229,7 @@ private:
   std::optional<_immediate_mesh>
   _exportMesh(IGameNode &igame_node_,
               IGameMesh &igame_mesh_,
-              const std::optional<_vertex_skin_data> &skin_data_);
+              const std::optional<skin_statistics> &skin_data_);
 
   std::optional<_immediate_mesh> _exportMeshIndexed(IGameNode &igame_node_,
                                                     IGameMesh &igame_mesh_);
@@ -195,7 +238,7 @@ private:
   _convertMesh(const _immediate_mesh &imm_mesh_,
                const std::vector<glTF::object_ptr<glTF::material>> &materials_);
 
-  std::pair<glTF::object_ptr<glTF::skin>, _vertex_skin_data>
+  std::pair<glTF::object_ptr<glTF::skin>, skin_statistics>
   _exportSkin(IGameNode &igame_node_,
               IGameSkin &igame_skin_,
               glTF::object_ptr<glTF::node> glTF_mesh_node_);

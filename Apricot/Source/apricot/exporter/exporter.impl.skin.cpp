@@ -6,10 +6,10 @@
 #include <glm/gtx/matrix_decompose.hpp>
 
 namespace apricot {
-std::pair<glTF::object_ptr<glTF::skin>, exporter_impl::_vertex_skin_data>
+std::pair<glTF::object_ptr<glTF::skin>, exporter_impl::skin_statistics>
 exporter_impl::_exportSkin(IGameNode &igame_node_,
-                              IGameSkin &igame_skin_,
-                              glTF::object_ptr<glTF::node> glTF_mesh_node_) {
+                           IGameSkin &igame_skin_,
+                           glTF::object_ptr<glTF::node> glTF_mesh_node_) {
   // https://github.com/OGRECave/EasyOgreExporter/blob/master/source/ExSkeleton.cpp
   // https://github.com/homer6/c_reading/blob/4dc6b608203bb0a053c703d80b6af5e1141983ab/cat_mother/maxexport/SgUtil.cpp
   auto glTFSkin = _document.factory().make<glTF::skin>();
@@ -87,8 +87,6 @@ exporter_impl::_exportSkin(IGameNode &igame_node_,
 
   auto nVerts = igame_skin_.GetNumOfSkinnedVerts();
 
-  decltype(_vertex_skin_data::sets) sets;
-
   auto inverseBindMatricesAccessor = _makeSimpleAccessor(
       glTF::accessor::type_type::mat4,
       glTF::accessor::component_type::the_float, inverseBindMatrices.size());
@@ -102,41 +100,53 @@ exporter_impl::_exportSkin(IGameNode &igame_node_,
   }
   glTFSkin->inverse_bind_matrices(inverseBindMatricesAccessor);
 
-  bool exceedMaxAllowedJoints = false;
-  auto addset = [&]() {
-    auto iset = sets.size();
-    auto j = std::make_unique<std::byte[]>(sizeof(JointStorage) * 4 * nVerts);
-    std::fill_n(reinterpret_cast<JointStorage *>(j.get()), 4 * nVerts,
-                JointStorage(-1));
-    auto w = std::make_unique<std::byte[]>(sizeof(WeightStorage) * 4 * nVerts);
-    sets.emplace_back(
-        _vertex_skin_data::jw_channel{std::move(j), std::move(w)});
-  };
-
-  addset();
-  auto ensureSets =
-      [&](_immediate_mesh::vertex_list::vertex_count_type influence_size_) {
-        if (influence_size_ > 4) {
-          auto setsreq = influence_size_ / 4;
-          if (influence_size_ % 4 != 0) {
-            ++setsreq;
-          }
-          if (sets.size() < setsreq) {
-            for (decltype(setsreq) i = 0; i < (setsreq - sets.size()); ++i) {
-              addset();
-            }
-          }
-        }
-      };
-
+  std::size_t maxPossibleInflunces = 0;
+  // Count max influence of per vertex.
   auto nSkinnedVertices = igame_skin_.GetNumOfSkinnedVerts();
+  for (decltype(nSkinnedVertices) iSkinnedVertex = 0;
+       iSkinnedVertex < nSkinnedVertices; ++iSkinnedVertex) {
+    auto vertexType = igame_skin_.GetVertexType(iSkinnedVertex);
+    if (vertexType == IGameSkin::VertexType::IGAME_RIGID) {
+      maxPossibleInflunces =
+          std::max(maxPossibleInflunces, decltype(maxPossibleInflunces)(1));
+    } else {
+      // vertexType == IGameSkin::VertexType::IGAME_RIGID_BLENDED
+      maxPossibleInflunces =
+          std::max(maxPossibleInflunces,
+                   decltype(maxPossibleInflunces)(
+                       igame_skin_.GetNumberOfBones(iSkinnedVertex)));
+    }
+  }
 
-  auto readJW = [&](decltype(nSkinnedVertices) vertex_index_,
-                    decltype(igame_skin_.GetNumberOfBones(
-                        nSkinnedVertices)) affecting_bone_index_) {
-    auto iset = affecting_bone_index_ / 4;
-    auto iinflu = affecting_bone_index_ % 4;
+  // If the limit is beyond, we have to reduce.
+  auto nInfluences = 0;
+  bool influencesMayOverrange = false;
+  if (!_settings.max_joint_influence ||
+      *_settings.max_joint_influence >= maxPossibleInflunces) {
+    nInfluences = maxPossibleInflunces;
+  } else {
+    // TODO LOG
+    nInfluences = *_settings.max_joint_influence;
+    influencesMayOverrange = true;
+  }
 
+  // Allocate space for channels.
+  constexpr auto influenceUnitSize = 4;
+  auto influenceCapacity = (nInfluences / influenceUnitSize +
+                            (nInfluences % influenceUnitSize ? 1 : 0)) *
+                           influenceUnitSize;
+
+  using VertexIndex = decltype(nSkinnedVertices);
+  using WeightIn = float;
+  using NumberOfAffectingBones = decltype(igame_skin_.GetNumberOfBones(0));
+  using InflunceIndex = std::size_t;
+
+  skin_statistics vertexSkinData(influenceCapacity, nVerts);
+
+  auto readJW = [&](InflunceIndex influnce_index_,
+                    decltype(nSkinnedVertices) vertex_index_,
+                    NumberOfAffectingBones affecting_bone_index_,
+                    WeightIn weight_) {
     auto affectingBoneId =
         igame_skin_.GetBoneID(vertex_index_, affecting_bone_index_);
     auto rBoneArrayIndex = boneMap.find(affectingBoneId);
@@ -147,44 +157,62 @@ exporter_impl::_exportSkin(IGameNode &igame_node_,
 
     auto boneArrayIndex = rBoneArrayIndex->second;
     assert(boneArrayIndex >= 0);
-    reinterpret_cast<JointStorage *>(
-        sets[iset].joints.get())[4 * vertex_index_ + iinflu] = boneArrayIndex;
-
-    auto weight = igame_skin_.GetWeight(vertex_index_, affecting_bone_index_);
-    if (weight <= 0) {
+    if (weight_ <= 0) {
       return;
     }
-    reinterpret_cast<WeightStorage *>(
-        sets[iset].weights.get())[4 * vertex_index_ + iinflu] = weight;
+
+    vertexSkinData.set_influence(vertex_index_, influnce_index_, boneArrayIndex,
+                                 weight_);
   };
 
+  auto sortedInfluences =
+      std::make_unique<std::pair<NumberOfAffectingBones, WeightIn>[]>(
+          maxPossibleInflunces);
   for (decltype(nSkinnedVertices) iSkinnedVertex = 0;
        iSkinnedVertex < nSkinnedVertices; ++iSkinnedVertex) {
     auto vertexType = igame_skin_.GetVertexType(iSkinnedVertex);
     if (vertexType == IGameSkin::VertexType::IGAME_RIGID) {
-      readJW(iSkinnedVertex, 0);
+      readJW(0, iSkinnedVertex, 0, igame_skin_.GetWeight(iSkinnedVertex, 0));
     } else {
       // vertexType == IGameSkin::VertexType::IGAME_RIGID_BLENDED
       const auto nEffectingBones = igame_skin_.GetNumberOfBones(iSkinnedVertex);
-      ensureSets(nEffectingBones);
-      for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
-           iAffectingBone != nEffectingBones; ++iAffectingBone) {
-        readJW(iSkinnedVertex, iAffectingBone);
+      if (!influencesMayOverrange || nEffectingBones <= influenceCapacity) {
+        for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
+             iAffectingBone != nEffectingBones; ++iAffectingBone) {
+          readJW(iAffectingBone, iSkinnedVertex, iAffectingBone,
+                 igame_skin_.GetWeight(iSkinnedVertex, iAffectingBone));
+        }
+      } else {
+        // Sort bones.
+        for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
+             iAffectingBone != nEffectingBones; ++iAffectingBone) {
+          sortedInfluences[iAffectingBone] = std::make_pair(
+              iAffectingBone,
+              igame_skin_.GetWeight(iSkinnedVertex, iAffectingBone));
+        }
+        std::sort(sortedInfluences.get(),
+                  sortedInfluences.get() + nEffectingBones,
+                  [&](auto b1_, auto b2_) { return b1_.second < b2_.second; });
+
+        WeightIn weightSum = 0.0;
+        for (std::remove_const_t<decltype(nEffectingBones)> iAffectingBone = 0;
+             iAffectingBone != influenceCapacity; ++iAffectingBone) {
+          weightSum += sortedInfluences[iAffectingBone].second;
+        }
+
+        // Only the bones with highest weights are used.
+        for (std::remove_const_t<decltype(influenceCapacity)> iInflunce = 0;
+             iInflunce != influenceCapacity; ++iInflunce) {
+          readJW(iInflunce, iSkinnedVertex, sortedInfluences[iInflunce].first,
+                 sortedInfluences[iInflunce].second / weightSum);
+        }
       }
     }
   }
 
-  if (exceedMaxAllowedJoints) {
-    // TODO warning
-  }
-
-  _vertex_skin_data vertexSkinData;
-  vertexSkinData.joint_storage = glTF::accessor::component_type::unsigned_short;
-  vertexSkinData.weight_storage = glTF::accessor::component_type::the_float;
-  vertexSkinData.sets = std::move(sets);
 #ifdef DEBUG_TPOSE
   vertexSkinData.bindposes = inverseBindMatrices;
 #endif
   return {glTFSkin, std::move(vertexSkinData)};
 }
-} // namespace fant
+} // namespace apricot

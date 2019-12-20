@@ -90,7 +90,7 @@ exporter_impl::exporter_impl(Interface &max_interface_,
     case IGameObject::ObjectTypes::IGAME_MESH: {
       auto &igameMesh = static_cast<IGameMesh &>(*object);
       glTF::object_ptr<glTF::skin> glTFSkin;
-      std::optional<_vertex_skin_data> vertexSkinData;
+      std::optional<skin_statistics> vertexSkinData;
       if (igameMesh.IsObjectSkinned()) {
         std::tie(glTFSkin, vertexSkinData) =
             _exportSkin(igameNode, *igameMesh.GetIGameSkin(), glTFNode);

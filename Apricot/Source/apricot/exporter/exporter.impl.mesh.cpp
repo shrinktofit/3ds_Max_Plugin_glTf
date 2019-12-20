@@ -210,7 +210,7 @@ glTF::object_ptr<glTF::accessor> exporter_impl::_addIndices(
 std::optional<exporter_impl::_immediate_mesh>
 exporter_impl::_exportMesh(IGameNode &igame_node_,
                            IGameMesh &igame_mesh_,
-                           const std::optional<_vertex_skin_data> &skin_data_) {
+                           const std::optional<skin_statistics> &skin_data_) {
   // https://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2019/ENU/3DSMax-MAXScript/files/GUID-CBBA20AD-F7D5-46BC-9F5E-5EDA109F9CF4-htm.html
   // https://forums.autodesk.com/t5/3ds-max-programming/weird-igamemesh-problem/td-p/6275934
   // https://help.autodesk.com/view/3DSMAX/2015/ENU/?guid=__cpp_ref_idx__r_list_of_mapping_channel_index_values_html_html
@@ -248,7 +248,8 @@ exporter_impl::_exportMesh(IGameNode &igame_node_,
     NormalChannelComponent *normal;
     ColorChannelComponent *color; // Optional
     std::unique_ptr<TexcoordChannelComponent *[]> texcoords;
-    std::unique_ptr<std::pair<std::byte *, std::byte *>[]> jws;
+    _immediate_mesh::joint_storage_type *joint;
+    _immediate_mesh::weight_storage_type *weight;
   };
 
   auto addChannels = [&](_immediate_mesh::vertex_list &vertices_) {
@@ -278,22 +279,25 @@ exporter_impl::_exportMesh(IGameNode &igame_node_,
                 glTF::accessor::component_type::the_float));
       }
     }
-    decltype(ChannelList::jws) jwChannels;
+
+    _immediate_mesh::joint_storage_type *jointChannel = nullptr;
+    _immediate_mesh::weight_storage_type *weightChannel = nullptr;
     if (skin_data_) {
-      auto nJWSets = skin_data_->sets.size();
-      jwChannels =
-          std::make_unique<decltype(jwChannels)::element_type[]>(nJWSets);
-      for (decltype(nJWSets) iJWSet = 0; iJWSet < nJWSets; ++iJWSet) {
-        jwChannels[iJWSet].first = vertices_.add_channel(
-            glTF::standard_semantics::joints(iJWSet),
-            glTF::accessor::type_type::vec4, skin_data_->joint_storage);
-        jwChannels[iJWSet].second = vertices_.add_channel(
-            glTF::standard_semantics::weights(iJWSet),
-            glTF::accessor::type_type::vec4, skin_data_->weight_storage);
-      }
+      jointChannel = reinterpret_cast<_immediate_mesh::joint_storage_type *>(
+          vertices_.add_channel(glTF::standard_semantics::joints(0),
+                                glTF::accessor::type_type::scalar,
+                                _immediate_mesh::joint_storage,
+                                skin_data_->influence_count));
+      weightChannel = reinterpret_cast<_immediate_mesh::weight_storage_type *>(
+          vertices_.add_channel(glTF::standard_semantics::weights(0),
+                                glTF::accessor::type_type::scalar,
+                                _immediate_mesh::weight_storage,
+                                skin_data_->influence_count));
     }
-    return ChannelList{positionChannel, normalChannel, colorChannel,
-                       std::move(texcoordChannels), std::move(jwChannels)};
+
+    return ChannelList{positionChannel, normalChannel,
+                       colorChannel,    std::move(texcoordChannels),
+                       jointChannel,    weightChannel};
   };
 
   auto addFace = [&](ChannelList &channels_, FaceEx &face_, int face_index_) {
@@ -340,20 +344,19 @@ exporter_impl::_exportMesh(IGameNode &igame_node_,
       }
 
       if (skin_data_) {
-        auto &jwsets = skin_data_->sets;
-        auto jointBytes =
-            glTF::accessor::required_bytes(skin_data_->joint_storage) * 4;
-        auto weightBytes =
-            glTF::accessor::required_bytes(skin_data_->weight_storage) * 4;
-        for (decltype(jwsets.size()) iJWSet = 0; iJWSet < jwsets.size();
-             ++iJWSet) {
-          auto &jwset = jwsets[iJWSet];
-          auto [jointChannel, weightChannel] = channels_.jws[iJWSet];
-          std::copy_n(&jwset.joints[jointBytes * iVertex], jointBytes,
-                      &jointChannel[jointBytes * outputVertexIndex]);
-          std::copy_n(&jwset.weights[weightBytes * iVertex], weightBytes,
-                      &weightChannel[weightBytes * outputVertexIndex]);
-        }
+        const auto jointAttributeComponents = skin_data_->influence_count;
+        std::copy_n(skin_data_->joint_channel.get() +
+                        jointAttributeComponents * iVertex,
+                    jointAttributeComponents,
+                    channels_.joint +
+                        jointAttributeComponents * outputVertexIndex);
+
+        const auto weightAttributeComponents = skin_data_->influence_count;
+        std::copy_n(skin_data_->joint_channel.get() +
+                        weightAttributeComponents * iVertex,
+                    weightAttributeComponents,
+                    channels_.joint +
+                        weightAttributeComponents * outputVertexIndex);
       }
     };
 

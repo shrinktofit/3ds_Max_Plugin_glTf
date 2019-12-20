@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <optional>
+
 namespace apricot {
 struct export_settings {
   enum class format_t {
@@ -22,5 +24,8 @@ struct export_settings {
     least_u8,
     least_u16,
   } index_type;
+
+  using max_joint_influence_t = unsigned;
+  std::optional<max_joint_influence_t> max_joint_influence;
 };
 } // namespace apricot

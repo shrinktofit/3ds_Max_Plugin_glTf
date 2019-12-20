@@ -19,13 +19,8 @@ int exporter::do_export(const MCHAR *name,
 
   auto path = std::filesystem::path(name);
 
-  export_settings settings;
-  settings.format = export_settings::format_t::json;
-  settings.index_type = export_settings::index_type_t::least_u8;
-  settings.image_storage = export_settings::image_storage_t::standalone;
-
   glTF::document glTFDocument;
-  exporter_impl visitor{*i, glTFDocument, settings, *ei->theScene};
+  exporter_impl visitor{*i, glTFDocument, settings_, *ei->theScene};
 
   auto extStr = path.extension().string();
   auto extStrLower = extStr;
@@ -35,7 +30,7 @@ int exporter::do_export(const MCHAR *name,
   bool isGlb = extStrLower == ".glb";
 
   // Assign url to each buffer and write them.
-  if (settings.format == export_settings::format_t::json) {
+  if (settings_.format == export_settings::format_t::json) {
     auto glTFFileDir = path.parent_path();
     auto nBuffers = glTFDocument.factory().get_size<glTF::buffer>();
     for (decltype(nBuffers) iBuffer = 0; iBuffer < nBuffers; ++iBuffer) {
